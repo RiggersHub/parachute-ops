@@ -566,6 +566,23 @@ function load(){
   try{ getUnitSystems().forEach(s=>{if(!allSys.includes(s)) allSys.push(s);}); }catch(e){}
   
   try{ purgeOldArchive(); }catch(e){}
+  // Migrate: rename Condemned -> Out of Service in saved config
+  try{
+    var units=JSON.parse(localStorage.getItem('pms_units')||'[]');
+    units.forEach(function(u){
+      if(u.statusCats){u.statusCats=u.statusCats.map(function(c){return c==='Condemned'?'Out of Service':c;});}
+    });
+    localStorage.setItem('pms_units',JSON.stringify(units));
+    // Also fix statusCounts keys
+    if(S.statusCounts){
+      Object.keys(S.statusCounts).forEach(function(sys){
+        if(S.statusCounts[sys].condemned){
+          S.statusCounts[sys].outofservice=S.statusCounts[sys].condemned;
+          delete S.statusCounts[sys].condemned;
+        }
+      });
+    }
+  }catch(e){}
   if(S.sections) S.sections.forEach(sec=>{
     if(!sec.rows) sec.rows=[];
     sec.rows.forEach(r=>{ if(r.serialNumber&&r.packer) r._packed=true; });
@@ -2359,15 +2376,15 @@ function rowHTML(sec,r,i){
   const osdColor=osdStatus==='red'?'color:#dc2626;font-weight:700;':osdStatus==='yellow'?'color:#d97706;font-weight:700;':'';
   var ti=i*8+1;
   return `<tr class="${locked?'row-locked':''}" style="${rowStyle}">
-    <td><input type="checkbox" class="row-cb" data-sec="${sec.id}" data-ri="${i}"></td>
-    <td><input type="text" value="${esc(r.serialNumber)}" placeholder="S/N" onchange="onSN(${sec.id},${i},this.value)" tabindex="${ti}" ${dis}></td>
-    <td><input type="text" value="${esc(r.dom)}" placeholder="MMYY" onblur="onDateBlur(this,${sec.id},${i},'dom')" onkeydown="onDateKey(event,this,${sec.id},${i},'dom')" style="width:65px;" tabindex="${ti+1}" ${dis}></td>
-    <td><input type="text" value="${esc(r.pis)}" placeholder="MMYY" onblur="onDateBlur(this,${sec.id},${i},'pis')" onkeydown="onDateKey(event,this,${sec.id},${i},'pis')" style="width:65px;" tabindex="${ti+2}" ${dis}></td>
+    <td><input type="checkbox" class="row-cb" data-sec="${sec.id}" data-ri="${i}" tabindex="-1"></td>
+    <td><input type="text" value="${esc(r.serialNumber)}" placeholder="S/N" onchange="onSN(${sec.id},${i},this.value)" class="tab-field" ${dis}></td>
+    <td><input type="text" value="${esc(r.dom)}" placeholder="MMYY" onblur="onDateBlur(this,${sec.id},${i},'dom')" onkeydown="onDateKey(event,this,${sec.id},${i},'dom')" style="width:65px;" class="tab-field" ${dis}></td>
+    <td><input type="text" value="${esc(r.pis)}" placeholder="MMYY" onblur="onDateBlur(this,${sec.id},${i},'pis')" onkeydown="onDateKey(event,this,${sec.id},${i},'pis')" style="width:65px;" class="tab-field" ${dis}></td>
     <td><span class="cell-readonly" style="${osdColor}">${osdDisplay}</span></td>
-    <td><input type="text" value="${esc(r.dbag)}" placeholder="D-Bag" onchange="upd(${sec.id},${i},'dbag',this.value)" tabindex="${ti+3}" ${dis}></td>
-    <td><input type="text" list="packer-list" value="${esc(r.packer)}" placeholder="Packer" onchange="onPkr(${sec.id},${i},this.value,this)" tabindex="${ti+4}" ${dis}></td>
-    <td><input type="text" list="ip-list" value="${esc(r.ip)}" placeholder="IP" onchange="onIP(${sec.id},${i},this.value,this)" tabindex="${ti+5}" ${dis}></td>
-    <td><input type="date" value="${r.packDate||''}" onchange="upd(${sec.id},${i},'packDate',this.value)" style="width:115px;" tabindex="${ti+6}" ${dis}></td>
+    <td><input type="text" value="${esc(r.dbag)}" placeholder="D-Bag" onchange="upd(${sec.id},${i},'dbag',this.value)" class="tab-field" ${dis}></td>
+    <td><input type="text" list="packer-list" value="${esc(r.packer)}" placeholder="Packer" onchange="onPkr(${sec.id},${i},this.value,this)" class="tab-field" ${dis}></td>
+    <td><input type="text" list="ip-list" value="${esc(r.ip)}" placeholder="IP" onchange="onIP(${sec.id},${i},this.value,this)" class="tab-field" ${dis}></td>
+    <td><input type="date" value="${r.packDate||''}" onchange="upd(${sec.id},${i},'packDate',this.value)" style="width:115px;" class="tab-field" ${dis}></td>
     <td><div class="row-actions">
       <button class="row-action-btn" onclick="toggleLock(${sec.id},${i})" title="${locked?'Unlock to edit':'Lock row'}">${locked?'🔒':'✏️'}</button>
       <button class="row-action-btn delete" onclick="delRow(${sec.id},${i})" title="Delete">🗑</button>
@@ -5155,6 +5172,36 @@ async function pushLocalToDB(){
   }
 }
 
+
+// ══ TAB NAVIGATION ══
+document.addEventListener('keydown',function(e){
+  if(e.key!=='Tab') return;
+  var el=document.activeElement;
+  if(!el||!el.classList.contains('tab-field')) return;
+  // Stay within the current section's scroll container
+  var container=el.closest('.section-table-scroll');
+  if(!container) container=el.closest('table');
+  if(!container) return;
+  e.preventDefault();
+  // Get all tab-fields within this row first, then next rows
+  var row=el.closest('tr');
+  if(!row) return;
+  var allRows=Array.from(container.querySelectorAll('tbody tr'));
+  var rowIdx=allRows.indexOf(row);
+  // Build ordered field list: all fields in current row, then next row, etc.
+  var fields=[];
+  for(var r=0;r<allRows.length;r++){
+    var rowFields=Array.from(allRows[r].querySelectorAll('.tab-field:not([disabled])'));
+    rowFields.forEach(function(f){fields.push(f);});
+  }
+  var idx=fields.indexOf(el);
+  if(idx<0) return;
+  var next=e.shiftKey?idx-1:idx+1;
+  if(next>=0&&next<fields.length){
+    fields[next].focus();
+    if(fields[next].type!=='date') fields[next].select();
+  }
+});
 
 // ══ INIT ══
 ensureDefaultAdmin();
