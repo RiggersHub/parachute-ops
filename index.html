@@ -1648,6 +1648,18 @@ function checkSession(){
 function updateUserDisplay(){
   var el=document.getElementById('currentUserDisplay');
   if(el&&currentUser){
+    // Check if role was changed by admin
+    var users=getUsers();
+    var me=users.find(function(u){return u.name===currentUser.name;});
+    if(me&&me.role!==currentUser.role){
+      var newRole=me.role;
+      var dispNew=newRole==='masteradmin'?'admin':newRole;
+      currentUser.role=newRole;
+      sessionStorage.setItem('pms_session',JSON.stringify(currentUser));
+      toast('Your role has been changed to '+dispNew+'. Logging out...','warning',5000);
+      setTimeout(function(){doLogout();},3000);
+      return;
+    }
     el.innerHTML='<span class="user-pill role-'+currentUser.role+'">'+esc(currentUser.lastName||currentUser.name)+'</span>';
   }
   // Hide admin tab for non-admins
@@ -3643,10 +3655,10 @@ function renderPSR(){
   const ipToday={};
 
   S.sections.forEach(sec=>{
-    totalChutes+=sec.rows.length;
+    totalChutes+=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;}).length;
     totalCapacity+=sec.maxChutes;
     if(!systemTotals[sec.systemType]) systemTotals[sec.systemType]={count:0,capacity:0};
-    systemTotals[sec.systemType].count+=sec.rows.length;
+    systemTotals[sec.systemType].count+=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;}).length;
     systemTotals[sec.systemType].capacity+=sec.maxChutes;
 
     let earliestExp=null;
@@ -3665,9 +3677,9 @@ function renderPSR(){
       if(r.ip&&r.packDate===today) ipToday[r.ip]=(ipToday[r.ip]||0)+1;
     });
 
-    const pct=sec.maxChutes>0?Math.round((sec.rows.length/sec.maxChutes)*100):0;
+    var packedLen=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;}).length; const pct=sec.maxChutes>0?Math.round((packedLen/sec.maxChutes)*100):0;
     binSummary.push({
-      bin:sec.binLocation, system:sec.systemType, count:sec.rows.length,
+      bin:sec.binLocation, system:sec.systemType, count:packedLen,
       max:sec.maxChutes, pct, earliestExp, secId:sec.id
     });
   });
@@ -4313,7 +4325,7 @@ function renderWeekly(){
     let totalPacked=0, totalExpired=0, popped=0;
     S.sections.forEach(sec=>{
       if(sec.systemType!==sys) return;
-      totalPacked+=sec.rows.length;
+      totalPacked+=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;}).length;
       sec.rows.forEach(r=>{
         if(r.expirationDate){
           const exp=new Date(r.expirationDate+'T00:00:00');
