@@ -429,6 +429,7 @@
       <button class="nav-tab" data-page="psr">PSR / Overview</button>
       <button class="nav-tab" data-page="weekly">Weekly Data Report</button>
       <button class="nav-tab" data-page="archive">Archived Records</button>
+      <button class="nav-tab" data-page="inventory">Inventory</button>
       <button class="nav-tab" data-page="csvupload">Upload Files</button>
       <button class="nav-tab" data-page="admin">Admin</button>
     </div>
@@ -516,6 +517,24 @@
 <datalist id="bin-datalist"></datalist>
 
 <!-- Admin Page -->
+<div id="page-inventory" style="display:none;">
+  <div class="page-header">
+    <h1 class="page-title">Master Inventory</h1>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <button class="btn btn-primary btn-sm" onclick="showAddInventory()">+ Add Serial</button>
+      <button class="btn btn-secondary btn-sm" onclick="generateBarcodes()">Print All Barcodes</button>
+      <button class="btn btn-secondary btn-sm" onclick="generateBarcodeSheet('selected')">Print Selected</button>
+    </div>
+  </div>
+  <div style="padding:0 24px 8px;">
+    <input type="text" class="form-input" id="invSearch" placeholder="Search inventory..." style="max-width:300px;font-size:12px;" oninput="renderInventory()">
+  </div>
+  <div style="padding:0 24px;">
+    <div id="inventoryList" style="max-height:600px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;"></div>
+  </div>
+  <div style="padding:12px 24px;font-size:11px;color:var(--text-muted);" id="invCount"></div>
+</div>
+
 <div id="page-admin" style="display:none;">
   <div class="page-header">
     <h1 class="page-title">Administration</h1>
@@ -565,6 +584,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 <script>
 const CFG = {
@@ -983,6 +1003,7 @@ document.querySelectorAll('.nav-tab').forEach(tab=>{ tab.addEventListener('click
   if(tab.dataset.page==='archive') renderArchive();
   if(tab.dataset.page==='psr') renderPSR();
   if(tab.dataset.page==='weekly') renderWeekly();
+  if(tab.dataset.page==='inventory') renderInventory();
   if(tab.dataset.page==='csvupload') renderCSVUpload();
   if(tab.dataset.page==='admin') renderAdmin();
   updateUserDisplay();
@@ -5611,6 +5632,117 @@ function generateBarcodes(type,format,size,secFilter){
       }
     });
   },500);
+}
+
+
+function renderInventory(){
+  var container=document.getElementById('inventoryList');
+  var countEl=document.getElementById('invCount');
+  if(!container) return;
+  var inv=S.masterInventory||{};
+  var keys=Object.keys(inv).sort();
+  var search=(document.getElementById('invSearch')||{}).value||'';
+  if(search){
+    var q=search.toLowerCase();
+    keys=keys.filter(function(sn){return sn.toLowerCase().includes(q);});
+  }
+  if(countEl) countEl.textContent=keys.length+' serial numbers in inventory'+(search?' (filtered from '+Object.keys(inv).length+')':'');
+  if(keys.length===0){
+    container.innerHTML='<div style="text-align:center;padding:30px;color:var(--text-muted);">No inventory items'+(search?' matching search':'')+'</div>';
+    return;
+  }
+  var html='<table class="data-table"><thead><tr>';
+  html+='<th style="width:32px;"><input type="checkbox" onchange="toggleAllInv(this.checked)"></th>';
+  html+='<th>Serial Number</th><th>DOM</th><th>PIS</th><th>OSD</th><th>Location</th><th style="width:60px;"></th>';
+  html+='</tr></thead><tbody>';
+  keys.forEach(function(sn){
+    var item=inv[sn];
+    var location='\u2014';
+    S.sections.forEach(function(sec){
+      sec.rows.forEach(function(r){
+        if(r.serialNumber===sn) location=sec.binLocation+' ('+sec.systemType+')';
+      });
+    });
+    html+='<tr>';
+    html+='<td><input type="checkbox" class="inv-cb" data-sn="'+esc(sn)+'"></td>';
+    html+='<td style="font-weight:600;">'+esc(sn)+'</td>';
+    html+='<td>'+(item.dom||'\u2014')+'</td>';
+    html+='<td>'+(item.pis||'\u2014')+'</td>';
+    html+='<td>'+(item.osd||'\u2014')+'</td>';
+    html+='<td style="font-size:11px;color:var(--text-muted);">'+location+'</td>';
+    html+='<td><button class="row-action-btn delete" onclick="deleteInventoryItem(\''+esc(sn)+'\')">\u2715</button></td>';
+    html+='</tr>';
+  });
+  html+='</tbody></table>';
+  container.innerHTML=html;
+}
+function toggleAllInv(checked){document.querySelectorAll('.inv-cb').forEach(function(cb){cb.checked=checked;});}
+function showAddInventory(){
+  showConfirm('Add to Inventory',
+    '<div style="text-align:left;"><div class="form-group"><label class="form-label">Serial Number</label><input type="text" class="form-input" id="addInvSN" placeholder="Serial number"></div><div class="form-group"><label class="form-label">DOM (MMYY)</label><input type="text" class="form-input" id="addInvDOM" placeholder="MMYY"></div><div class="form-group"><label class="form-label">PIS (MMYY)</label><input type="text" class="form-input" id="addInvPIS" placeholder="MMYY"></div></div>',
+    [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
+     {label:'Add',cls:'btn-primary',fn:function(){
+       var sn=document.getElementById('addInvSN').value.trim();
+       var dom=document.getElementById('addInvDOM').value.trim();
+       var pis=document.getElementById('addInvPIS').value.trim();
+       if(!sn){toast('Enter a serial number','error');return;}
+       if(S.masterInventory[sn]){toast('Already exists','warning');return;}
+       S.masterInventory[sn]={dom:dom,pis:pis,osd:calcOSDString(dom,pis)};
+       save();renderInventory();
+       toast('Added '+sn,'success');
+     }}]);
+}
+function deleteInventoryItem(sn){
+  showConfirm('Remove from Inventory','Remove <strong>'+esc(sn)+'</strong>?',
+    [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
+     {label:'Remove',cls:'btn-danger',fn:function(){
+       var backup=JSON.parse(JSON.stringify(S.masterInventory[sn]||{}));
+       delete S.masterInventory[sn];
+       save();renderInventory();
+       toast(sn+' removed','warning',8000,{label:'Undo',fn:function(){
+         S.masterInventory[sn]=backup;save();renderInventory();toast('Restored','success');
+       }});
+     }}]);
+}
+function getSelectedInventory(){
+  var sns=[];
+  document.querySelectorAll('.inv-cb:checked').forEach(function(cb){sns.push(cb.dataset.sn);});
+  return sns;
+}
+function generateBarcodes(){
+  var keys=Object.keys(S.masterInventory||{}).sort();
+  if(keys.length===0){toast('No inventory items','warning');return;}
+  openBarcodePreview(keys);
+}
+function generateBarcodeSheet(mode){
+  var keys=mode==='selected'?getSelectedInventory():Object.keys(S.masterInventory||{}).sort();
+  if(keys.length===0){toast(mode==='selected'?'Select items first':'No inventory','warning');return;}
+  openBarcodePreview(keys);
+}
+function openBarcodePreview(serialNumbers){
+  var body='<h1>Barcode Labels</h1>';
+  body+='<div class="header-info">'+serialNumbers.length+' labels \u00b7 Generated '+new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'})+'</div>';
+  body+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-top:12px;">';
+  serialNumbers.forEach(function(sn,idx){
+    body+='<div style="border:1px dashed #ccc;padding:6px 8px;text-align:center;page-break-inside:avoid;">';
+    body+='<svg id="bc-'+idx+'"></svg>';
+    body+='</div>';
+  });
+  body+='</div>';
+  body+='<div class="footer">Parachute Management System \u2014 Barcode Labels</div>';
+  openPrintPreview('Barcode Labels ('+serialNumbers.length+')', body);
+  setTimeout(function(){
+    serialNumbers.forEach(function(sn,idx){
+      var el=document.querySelector('#bc-'+idx);
+      if(el&&typeof JsBarcode!=='undefined'){
+        try{
+          JsBarcode(el,sn,{format:'CODE128',width:1.5,height:40,fontSize:11,margin:2,displayValue:true});
+        }catch(e){
+          el.outerHTML='<div style="font-size:10px;color:#999;">'+esc(sn)+'</div>';
+        }
+      }
+    });
+  },300);
 }
 
 // ══ TAB NAVIGATION ══
