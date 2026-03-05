@@ -570,10 +570,19 @@ function load(){
     sec.rows.forEach(r=>{ if(r.serialNumber&&r.packer) r._packed=true; });
   });
 }
+var _savingToDB=false;
+var _saveDebounce=null;
 function save(){ 
   try{ localStorage.setItem(getStorageKey(),JSON.stringify(S)); }catch(e){} 
-  // Async save to Supabase (non-blocking)
-  if(dbReady && activeUnitId){ dbLog('Saving to DB...'); saveToDB().then(function(){dbLog('Save complete');}).catch(function(e){dbLog('Save ERROR: '+(e.message||''));}); } else { dbLog('Skip DB save: dbReady='+dbReady+' unitId='+activeUnitId); }
+  // Debounced async save to Supabase (non-blocking)
+  if(dbReady && activeUnitId){
+    clearTimeout(_saveDebounce);
+    _saveDebounce=setTimeout(function(){
+      _savingToDB=true;
+      dbLog('Saving to DB...');
+      saveToDB().then(function(){dbLog('Save complete');_savingToDB=false;}).catch(function(e){dbLog('Save ERROR: '+(e.message||''));_savingToDB=false;});
+    }, 2000); // Wait 2 seconds after last edit before pushing to DB
+  }
 }
 
 // Toast with optional action button (for undo)
@@ -1425,16 +1434,19 @@ function setupRealtime() {
   
   sbClient.channel('pms-changes')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'pms_pack_records' }, async () => {
+      if(_savingToDB){console.log('Skip remote update - saving');return;}
       console.log('Pack records changed remotely');
       await loadFromDB();
       try { renderSections(); renderStatusBar(); } catch(e) {}
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'pms_sections' }, async () => {
+      if(_savingToDB){console.log('Skip remote update - saving');return;}
       console.log('Sections changed remotely');
       await loadFromDB();
       try { renderSections(); renderStatusBar(); } catch(e) {}
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'pms_signed_out' }, async () => {
+      if(_savingToDB){console.log('Skip remote update - saving');return;}
       console.log('Signed out changed remotely');
       await loadFromDB();
       try { renderPSR(); } catch(e) {}
@@ -2168,7 +2180,7 @@ function validateSN(secId,ri,sn){
     showConfirm('Duplicate Serial Number',
       `⚠️ <strong>${sn}</strong> already exists in <strong>${d.bin} (${d.sys})</strong>.<br><br>Check number or verify other sections.`,
       [
-        {label:'Cancel',cls:'btn-secondary',fn:()=>{ sec.rows[ri].serialNumber=''; save(); renderSections(); }},
+        {label:'Cancel',cls:'btn-secondary',fn:()=>{ sec.rows[ri].serialNumber=''; save(); renderSections(); toast('Duplicate cleared','warning',2000); }},
         {label:'View Location',cls:'btn-primary',fn:()=>{
           const card=document.querySelector(`.section-card[data-section-id="${d.secId}"]`);
           if(card){card.classList.remove('collapsed');card.scrollIntoView({behavior:'smooth'});}
@@ -2403,6 +2415,7 @@ function addRow(id){
 function onSN(secId,ri,val){
   const s=S.sections.find(x=>x.id===secId); if(!s||!s.rows||!s.rows[ri])return;
   const wasPacked=s.rows[ri]._packed;
+  const oldSN=s.rows[ri].serialNumber;
   s.rows[ri].serialNumber=val.trim(); save(); markDirty(secId);
   checkAutoDecrement(s,s.rows[ri],wasPacked);
   // T-11R and T-11R SP do not require serial number cross-check
@@ -2415,7 +2428,7 @@ function onSN(secId,ri,val){
         showConfirm('Duplicate Serial Number',
           `⚠️ <strong>${val.trim()}</strong> already exists in <strong>${d.bin} (${d.sys})</strong>.<br><br>Check number or verify other sections.`,
           [
-            {label:'Cancel',cls:'btn-secondary',fn:()=>{ s.rows[ri].serialNumber=''; save(); renderSections(); }},
+            {label:'Cancel',cls:'btn-secondary',fn:()=>{ s.rows[ri].serialNumber=''; save(); renderSections(); toast('Duplicate cleared','warning',2000); }},
             {label:'View Location',cls:'btn-primary',fn:()=>{
               const card=document.querySelector(`.section-card[data-section-id="${d.secId}"]`);
               if(card){card.classList.remove('collapsed');card.scrollIntoView({behavior:'smooth'});}
@@ -2567,7 +2580,14 @@ function markDirty(secId){
   dirtySections.add(secId);
   // Show save bars for this section
   const card=document.querySelector(`.section-card[data-section-id="${secId}"]`);
-  if(card) card.querySelectorAll('.save-bar').forEach(b=>b.classList.add('visible'));
+  if(card){
+    card.querySelectorAll('.save-bar').forEach(function(b){
+      b.classList.add('visible');
+      b.style.opacity='1';
+      b.style.height='auto';
+      b.style.overflow='visible';
+    });
+  }
   // Reset auto-save timer
   clearTimeout(autoSaveTimer);
   autoSaveTimer=setTimeout(()=>{
@@ -5183,4 +5203,3 @@ load(); autoMonthlySnapshot(); updateDL(); updateBinDL(); renderStatusBar(); ren
 </script>
 </body>
 </html>
-
