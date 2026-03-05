@@ -98,7 +98,7 @@
   .btn-success:hover { background: rgba(52,211,153,0.25); }
   .btn-sm { padding: 5px 10px; font-size: 12px; }
 
-  .main-content { padding: 24px; max-width: 1400px; margin: 0 auto; }
+  .main-content { padding: 24px; max-width: 1400px; margin: 0 auto; overflow-anchor: none; }
   .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
   .page-title { font-size: 20px; font-weight: 600; }
 
@@ -139,7 +139,7 @@
   .exp-expired { color: var(--danger); }
   .section-header-right { display: flex; align-items: center; gap: 8px; }
   .section-body { padding: 16px; }
-  .section-table-scroll { max-height: 230px; overflow-y: auto; overflow-x: auto; border: 1px solid var(--border); border-radius: 6px; transition: max-height 0.3s ease; }
+  .section-table-scroll { max-height: 230px; overflow-y: auto; overflow-x: auto; border: 1px solid var(--border); border-radius: 6px; transition: max-height 0.3s ease; contain: layout; will-change: scroll-position; -webkit-overflow-scrolling: touch; }
   .section-table-scroll.expanded { max-height: none; }
   .section-table-scroll::-webkit-scrollbar { width: 6px; }
   .section-table-scroll::-webkit-scrollbar-track { background: var(--bg-primary); }
@@ -462,6 +462,7 @@
       <div id="dbLog" style="max-height:120px;overflow-y:auto;font-size:11px;font-family:monospace;color:var(--text-secondary);white-space:pre-wrap;"></div>
       <button class="btn btn-secondary" style="font-size:10px;padding:3px 8px;margin-top:6px;" onclick="document.getElementById('dbLog').textContent=''">Clear</button>
       <button class="btn btn-primary" style="font-size:10px;padding:3px 8px;margin-top:6px;margin-left:6px;" onclick="pushLocalToDB()">Push Local Data to Database</button>
+      <button class="btn btn-primary" style="font-size:10px;padding:3px 8px;margin-top:6px;margin-left:6px;" onclick="syncFromDB()">Sync From Database</button>
       <button class="btn btn-secondary" style="font-size:10px;padding:3px 8px;margin-top:6px;margin-left:6px;" onclick="testDbMethods()">Test Connection</button>
     </div>
     <h3 style="font-size:14px;color:var(--text-secondary);margin-bottom:10px;">Audit Log</h3>
@@ -575,13 +576,12 @@ var _saveDebounce=null;
 function save(){ 
   try{ localStorage.setItem(getStorageKey(),JSON.stringify(S)); }catch(e){} 
   // Debounced async save to Supabase (non-blocking)
-  if(dbReady && activeUnitId){
+  if(dbReady && activeUnitId && !_savingToDB){
     clearTimeout(_saveDebounce);
     _saveDebounce=setTimeout(function(){
       _savingToDB=true;
-      dbLog('Saving to DB...');
-      saveToDB().then(function(){dbLog('Save complete');_savingToDB=false;}).catch(function(e){dbLog('Save ERROR: '+(e.message||''));_savingToDB=false;});
-    }, 2000); // Wait 2 seconds after last edit before pushing to DB
+      saveToDB().then(function(){dbLog('DB saved');_savingToDB=false;}).catch(function(e){dbLog('Save ERROR: '+(e.message||''));_savingToDB=false;});
+    }, 3000);
   }
 }
 
@@ -1431,29 +1431,24 @@ async function getAuditLogDB() {
 
 function setupRealtime() {
   if (!sbClient) return;
-  
-  sbClient.channel('pms-changes')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'pms_pack_records' }, async () => {
-      if(_savingToDB){console.log('Skip remote update - saving');return;}
-      console.log('Pack records changed remotely');
-      await loadFromDB();
-      try { renderSections(); renderStatusBar(); } catch(e) {}
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'pms_sections' }, async () => {
-      if(_savingToDB){console.log('Skip remote update - saving');return;}
-      console.log('Sections changed remotely');
-      await loadFromDB();
-      try { renderSections(); renderStatusBar(); } catch(e) {}
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'pms_signed_out' }, async () => {
-      if(_savingToDB){console.log('Skip remote update - saving');return;}
-      console.log('Signed out changed remotely');
-      await loadFromDB();
-      try { renderPSR(); } catch(e) {}
-    })
-    .subscribe();
-  
-  console.log('Real-time subscriptions active');
+  // Real-time sync disabled for now to prevent self-echo duplication
+  // Will re-enable with proper session ID filtering for multi-device sync
+  dbLog('Real-time: standby mode (manual sync)');
+}
+
+// Manual sync button - pull latest from DB
+async function syncFromDB(){
+  if(!sbClient||!activeUnitId){toast('No database connection','error');return;}
+  dbLog('Syncing from database...');
+  var loaded = await loadFromDB();
+  if(loaded){
+    renderStatusBar(); renderSections(); renderHome();
+    toast('Synced from database','success');
+    dbLog('Sync complete');
+  } else {
+    toast('Sync failed','error');
+    dbLog('Sync failed');
+  }
 }
 
 // ══════════════════════════════════════════════
@@ -5178,11 +5173,16 @@ load(); autoMonthlySnapshot(); updateDL(); updateBinDL(); renderStatusBar(); ren
       await resolveUnitId();
       if(activeUnitId){
         // Load data from DB
-        var loaded = await loadFromDB();
-        if(loaded){
-          // Re-render with DB data
-          renderStatusBar(); renderSections(); renderHome();
-          dbLog('Loaded data from Supabase');
+        // Only load from DB if localStorage is empty (fresh browser)
+        var hasLocalData = !!localStorage.getItem(getStorageKey());
+        if(!hasLocalData){
+          var loaded = await loadFromDB();
+          if(loaded){
+            renderStatusBar(); renderSections(); renderHome();
+            dbLog('Loaded data from Supabase (fresh browser)');
+          }
+        } else {
+          dbLog('Using local data (DB sync available via Admin)');
         }
         // Sync audit log
         await syncAuditLog();
