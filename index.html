@@ -5822,10 +5822,15 @@ function renderOpsSignOut(el){
     html+='<div style="margin-top:20px;border-top:1px solid var(--border);padding-top:16px;">';
     html+='<div style="font-size:13px;font-weight:600;margin-bottom:8px;">Active Sign-Outs</div>';
     activeOuts.forEach(function(so){
+      var soIdx=S.signedOut.indexOf(so);
+      var scanned=(so.scannedOut||[]).length;
       html+='<div class="archive-item">';
-      html+='<div class="archive-item-info"><div class="archive-item-title">'+esc(so.unit||'')+' \u2014 '+so.totalQty+' chutes</div>';
+      html+='<div class="archive-item-info"><div class="archive-item-title">'+esc(so.unit||'')+' \u2014 '+scanned+' chutes</div>';
       html+='<div class="archive-item-meta">'+esc(so.system||'')+' | Date: '+(so.date||'?')+'</div></div>';
-      html+='</div>';
+      html+='<div class="archive-item-actions">';
+      html+='<button class="btn btn-secondary btn-sm" onclick="opsShowScanOut('+soIdx+')">Edit/Scan</button>';
+      html+='<button class="btn btn-danger btn-sm" onclick="opsDeleteSignOut('+soIdx+')">Delete</button>';
+      html+='</div></div>';
     });
     html+='</div>';
   }
@@ -5922,12 +5927,12 @@ function opsCalcSignOut(){
   }
   
   // Store for execution
-  window._opsPlan={unit:unit,date:date,items:validItems,plans:plans};
+  opsFormCache._opsPlan={unit:unit,date:date,items:validItems,plans:plans};
   result.innerHTML=html;
 }
 
 function opsExecuteSignOut(){
-  var plan=window._opsPlan;
+  var plan=opsFormCache._opsPlan;
   if(!plan){toast('No plan','error');return;}
   if(!S.signedOut) S.signedOut=[];
   
@@ -5952,7 +5957,7 @@ function opsExecuteSignOut(){
   save();
   
   opsFormCache={unit:'',date:'',items:[]};
-  window._opsPlan=null;
+  opsFormCache._opsPlan=null;
   
   // Go to scan-out screen
   opsShowScanOut(signOutIdx);
@@ -6053,15 +6058,102 @@ function opsScanOutChute(signOutIdx){
 }
 
 function opsFinishScanOut(signOutIdx){
-  _activeScanOutIdx=null;
-  sessionStorage.removeItem('pms_scanOutIdx');
   var so=S.signedOut[signOutIdx];
+  if(!so){clearScanOutState();return;}
   var scanned=(so.scannedOut||[]).length;
   var total=so.totalQty||parseInt(so.count)||0;
-  if(scanned<total) toast('Signed out '+scanned+'/'+total+' scanned','warning');
-  else toast('All '+total+' chutes scanned out','success');
+  
+  if(scanned===0){
+    // Nothing scanned - ask: auto-mark from loading plan or go back?
+    showConfirm('No Chutes Scanned','You haven\'t scanned any chutes. What would you like to do?',
+      [{label:'Go Back & Scan',cls:'btn-primary',fn:function(){}},
+       {label:'Auto-Select from Plan',cls:'btn-secondary',fn:function(){
+         opsAutoMarkFromPlan(signOutIdx);
+         _activeScanOutIdx=null;
+         sessionStorage.removeItem('pms_scanOutIdx');
+         save();renderOps();
+         toast('Chutes auto-selected from loading plan','success');
+       }},
+       {label:'Delete This Sign-Out',cls:'btn-danger',fn:function(){
+         // Unmark any chutes and remove sign-out
+         opsUndoSignOut(signOutIdx);
+         clearScanOutState();
+       }}]);
+    return;
+  }
+  
+  if(scanned<total){
+    showConfirm('Incomplete Scan','Scanned '+scanned+'/'+total+'. Finish with only '+scanned+' chutes?',
+      [{label:'Keep Scanning',cls:'btn-primary',fn:function(){}},
+       {label:'Finish with '+scanned,cls:'btn-secondary',fn:function(){
+         // Update total to match scanned
+         so.totalQty=scanned;
+         _activeScanOutIdx=null;
+         sessionStorage.removeItem('pms_scanOutIdx');
+         save();renderOps();
+         toast(scanned+' chutes signed out','success');
+       }}]);
+    return;
+  }
+  
+  _activeScanOutIdx=null;
+  sessionStorage.removeItem('pms_scanOutIdx');
+  toast('All '+total+' chutes scanned out','success');
   save();
   renderOps();
+}
+
+function opsAutoMarkFromPlan(signOutIdx){
+  var so=S.signedOut[signOutIdx];
+  if(!so||!so.plans) return;
+  if(!so.scannedOut) so.scannedOut=[];
+  
+  // For each bin in the plan, mark the right number of chutes
+  so.plans.forEach(function(plan){
+    var sec=S.sections.find(function(s){return s.binLocation===plan.bin&&s.systemType===plan.system;});
+    if(!sec) return;
+    var remaining=plan.pull;
+    // Sort rows by expiration (earliest first - they go out first)
+    var availableRows=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip&&!r._signedOut;});
+    availableRows.sort(function(a,b){return (a.expirationDate||'z').localeCompare(b.expirationDate||'z');});
+    
+    availableRows.forEach(function(r){
+      if(remaining<=0) return;
+      r._signedOut=true;
+      r._signedOutTo=so.unit;
+      r._signedOutDate=so.date;
+      r._signOutIdx=signOutIdx;
+      so.scannedOut.push({sn:r.serialNumber,bin:sec.binLocation,system:sec.systemType,time:'auto'});
+      remaining--;
+    });
+  });
+}
+
+function opsUndoSignOut(signOutIdx){
+  var so=S.signedOut[signOutIdx];
+  if(!so) return;
+  // Unmark all chutes from this sign-out
+  S.sections.forEach(function(sec){sec.rows.forEach(function(r){
+    if(r._signOutIdx===signOutIdx){
+      r._signedOut=false;
+      delete r._signedOutTo;delete r._signedOutDate;delete r._signOutIdx;
+    }
+  });});
+  // Remove the sign-out entry
+  S.signedOut.splice(signOutIdx,1);
+  auditLog('signout','Sign Out Cancelled','Cancelled sign-out to '+(so.unit||''));
+  save();
+  toast('Sign-out cancelled','warning');
+}
+
+
+function opsDeleteSignOut(signOutIdx){
+  showConfirm('Delete Sign-Out','Cancel this sign-out and return all chutes to their bins?',
+    [{label:'Keep',cls:'btn-secondary',fn:function(){}},
+     {label:'Delete Sign-Out',cls:'btn-danger',fn:function(){
+       opsUndoSignOut(signOutIdx);
+       renderOps();
+     }}]);
 }
 
 // ═══ MODE 3: SIGN IN ═══
@@ -6238,13 +6330,32 @@ function opsProcessSignIn(signOutIdx){
   // Popped chutes stay marked as signed out (they're gone)
   // Add to popped tracker
   if(popped>0){
-    var items=so.items||[{system:'T-11',count:String(totalOut)}];
-    items.forEach(function(it){
-      var sys=it.system||'T-11';
+    // Figure out which chutes are popped (the ones NOT scanned in)
+    var scannedInSNs=(S._opsSignInLog||[]).map(function(e){return e.sn;});
+    var poppedSNs=(so.scannedOut||[]).filter(function(s){return scannedInSNs.indexOf(s.sn)<0;}).slice(0,popped);
+    
+    // Count popped per system
+    var poppedBySys={};
+    poppedSNs.forEach(function(p){
+      if(!poppedBySys[p.system]) poppedBySys[p.system]=0;
+      poppedBySys[p.system]++;
+    });
+    
+    // If no individual tracking, distribute evenly
+    if(Object.keys(poppedBySys).length===0){
+      var items=so.items||[{system:'T-11',count:String(totalOut)}];
+      var remaining=popped;
+      items.forEach(function(it){
+        var forSys=Math.min(remaining,parseInt(it.count)||0);
+        if(forSys>0) poppedBySys[it.system]=forSys;
+        remaining-=forSys;
+      });
+    }
+    
+    Object.keys(poppedBySys).forEach(function(sys){
       if(!S.statusCounts[sys]) S.statusCounts[sys]={};
       if(!S.statusCounts[sys].popped) S.statusCounts[sys].popped=[];
-      var poppedForSys=Math.min(popped,parseInt(it.count)||totalOut);
-      if(poppedForSys>0) S.statusCounts[sys].popped.push({bin:so.unit+' '+so.date,count:poppedForSys});
+      S.statusCounts[sys].popped.push({bin:so.unit+' '+so.date,count:poppedBySys[sys]});
     });
   }
   
