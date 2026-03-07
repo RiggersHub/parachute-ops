@@ -2474,7 +2474,7 @@ function expClass(dateStr){
 }
 
 function sectionHTML(sec){
-  const rc=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip&&!r._signedOut;}).length; const totalRows=sec.rows.length;
+  const rc=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip&&!r._signedOut;}).length; const soCount=sec.rows.filter(function(r){return r._signedOut;}).length; const totalRows=sec.rows.length;
   const earliest=getEarliestExpiration(sec);
   let dateInfo='';
   if(earliest){
@@ -2487,7 +2487,7 @@ function sectionHTML(sec){
         <span class="section-collapse-icon">▼</span>
         <span class="section-badge ${badge(sec.systemType)}">${sec.systemType}</span>
         <span class="section-title">${sec.binLocation}</span>
-        <span class="section-meta">${rc} packed / ${totalRows} entries / ${sec.maxChutes} max</span>
+        <span class="section-meta">${rc} packed${soCount>0?' / '+soCount+' signed out':''} / ${totalRows} entries / ${sec.maxChutes} max</span>
         ${dateInfo}
       </div>
       <div class="section-header-right">
@@ -2527,9 +2527,10 @@ function rowHTML(sec,r,i){
   const osdDisplay=r.osd||calcOSDString(r.dom,r.pis)||'—';
   const osdColor=osdStatus==='red'?'color:#dc2626;font-weight:700;':osdStatus==='yellow'?'color:#d97706;font-weight:700;':'';
   var ti=i*8+1;
-  return `<tr class="${locked?'row-locked':''}" style="${rowStyle}">
+  var soStyle=r._signedOut?'opacity:0.4;background:rgba(239,68,68,0.08);':'';
+  return `<tr class="${locked?'row-locked':''}" style="${rowStyle}${soStyle}" title="${r._signedOut?'Signed out to '+(r._signedOutTo||'?')+' on '+(r._signedOutDate||'?'):''}">
     <td><input type="checkbox" class="row-cb" data-sec="${sec.id}" data-ri="${i}" tabindex="-1"></td>
-    <td><input type="text" value="${esc(r.serialNumber)}" placeholder="S/N" onchange="onSN(${sec.id},${i},this.value)" class="tab-field" ${dis}></td>
+    <td><input type="text" value="${esc(r.serialNumber)}" placeholder="S/N" onchange="onSN(${sec.id},${i},this.value)" class="tab-field" ${dis}>${r._signedOut?'<span style="font-size:9px;color:var(--danger);font-weight:700;"> OUT</span>':''}</td>
     <td><input type="text" value="${esc(r.dom)}" placeholder="MMYY" onblur="onDateBlur(this,${sec.id},${i},'dom')" onkeydown="onDateKey(event,this,${sec.id},${i},'dom')" style="width:65px;" class="tab-field" ${dis}></td>
     <td><input type="text" value="${esc(r.pis)}" placeholder="MMYY" onblur="onDateBlur(this,${sec.id},${i},'pis')" onkeydown="onDateKey(event,this,${sec.id},${i},'pis')" style="width:65px;" class="tab-field" ${dis}></td>
     <td><span class="cell-readonly" style="${osdColor}">${osdDisplay}</span></td>
@@ -4026,7 +4027,7 @@ function renderPSR(){
   // Signed out totals
   if(!S.signedOut) S.signedOut=[];
   let totalSignedOut=0;
-  (S.signedOut||[]).filter(function(s){return s.status==='out'||!s.status;}).forEach(function(s){totalSignedOut+=(parseInt(s.count)||0);});
+  S.sections.forEach(function(sec){sec.rows.forEach(function(r){if(r._signedOut) totalSignedOut++;});});
 
   // ── Summary Cards ──
   html+=`<div class="psr-summary">
@@ -4096,21 +4097,25 @@ function renderPSR(){
   // ── Signed Out Chutes ──
   html+=`<div class="psr-section">
     <div class="psr-section-title">📋 Signed Out Chutes <button class="btn btn-sm btn-secondary" onclick="addSignedOut()" style="margin-left:8px;">+ Add</button></div>`;
-  if((S.signedOut||[]).filter(function(s){return s.status==='out'||!s.status;}).length>0){
+  if(totalSignedOut>0){
     html+=`<table class="psr-table"><thead><tr><th>Unit</th><th>System</th><th>Qty</th><th></th></tr></thead><tbody>`;
-    S.signedOut.filter(function(s){return s.status==='out'||!s.status;}).forEach((s,i)=>{
-      var systems=getUnitSystems();
-      var sysOpts='<option value="">-- Type --</option>';
-      systems.forEach(function(sys){ sysOpts+='<option value="'+sys+'"'+(s.system===sys?' selected':'')+'>'+sys+'</option>'; });
-      html+='<tr>';
-      html+='<td><input type="text" value="'+esc(s.unit)+'" placeholder="Unit name" onchange="updSignedOut('+i+',\'unit\',this.value)" style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:4px 8px;font-size:12px;width:100%;outline:none;font-family:inherit;"></td>';
-      html+='<td style="width:130px;"><select onchange="updSignedOut('+i+',\'system\',this.value)" style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:4px 8px;font-size:12px;width:100%;outline:none;font-family:inherit;">'+sysOpts+'</select></td>';
-      html+='<td style="width:80px;"><input type="number" value="'+(s.count||'')+'" min="0" placeholder="#" onchange="updSignedOut('+i+',\'count\',this.value)" style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:4px 8px;font-size:12px;width:60px;text-align:center;outline:none;font-family:inherit;"></td>';
-      html+='<td style="width:40px;"><button class="row-action-btn delete" onclick="delSignedOut('+i+')" title="Remove">🗑</button></td>';
-      html+='</tr>';
-    });
-    html+='<tr style="border-top:2px solid var(--border);"><td colspan="2"><strong>TOTAL</strong></td><td><strong>'+totalSignedOut+'</strong></td><td></td></tr>';
-    html+=`</tbody></table>`;
+    (function(){
+      // Build signed out by unit
+      var byUnit={};
+      S.sections.forEach(function(sec){sec.rows.forEach(function(r){
+        if(r._signedOut){
+          var key=(r._signedOutTo||'Unknown')+' '+(r._signedOutDate||'');
+          if(!byUnit[key]) byUnit[key]={unit:r._signedOutTo||'Unknown',date:r._signedOutDate||'',systems:{},total:0};
+          if(!byUnit[key].systems[sec.systemType]) byUnit[key].systems[sec.systemType]=0;
+          byUnit[key].systems[sec.systemType]++;
+          byUnit[key].total++;
+        }
+      });});
+      Object.values(byUnit).forEach(function(u){
+        var sysDesc=Object.keys(u.systems).map(function(s){return u.systems[s]+' '+s;}).join(', ');
+        html+=`<tr><td><strong>${esc(u.unit)}</strong></td><td>${sysDesc}</td><td><strong>${u.total}</strong></td><td>${u.date}</td></tr>`;
+      });
+    })();
   } else {
     html+=`<div style="color:var(--text-muted);font-size:12px;padding:8px;">No chutes signed out. Click + Add to track.</div>`;
   }
