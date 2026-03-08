@@ -4107,7 +4107,8 @@ function renderPSR(){
   // ── Signed Out Chutes ──
   html+=`<div class="psr-section">
     <div class="psr-section-title">📋 Signed Out Chutes <button class="btn btn-sm btn-secondary" onclick="addSignedOut()" style="margin-left:8px;">+ Add</button></div>`;
-  if(totalSignedOut>0){
+  var activeSignedOut=(S.signedOut||[]).filter(function(s){return s.status==='out';});
+  if(activeSignedOut.length>0||totalSignedOut>0){
     html+=`<table class="psr-table"><thead><tr><th>Unit</th><th>System</th><th>Qty</th><th></th></tr></thead><tbody>`;
     (function(){
       (S.signedOut||[]).filter(function(s){return s.status==='out';}).forEach(function(so){
@@ -4389,10 +4390,12 @@ function delSnapshot(idx){
     }}]);
 }
 function addSignedOut(){
+  try{
   if(!S.signedOut) S.signedOut=[];
   auditLog('signout','Sign Out','Added signed out entry');
   S.signedOut.push({unit:'',system:'',count:'',status:'out',scannedOut:[],date:new Date().toISOString().split('T')[0]});
   save(); renderPSR();
+  }catch(e){alert('addSignedOut error: '+e.message);}
 }
 function updSignedOut(idx,fld,val){
   if(!S.signedOut?.[idx]) return;
