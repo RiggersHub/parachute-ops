@@ -5778,10 +5778,14 @@ function renderOpsSignOut(el){
   
   html+='<div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">Systems to Sign Out</div>';
   fc.items.forEach(function(item,idx){
+    // Get already-selected systems (excluding current row)
+    var selectedSystems=fc.items.filter(function(it,ii){return ii!==idx&&it.system;}).map(function(it){return it.system;});
     html+='<div style="display:flex;gap:8px;align-items:end;margin-bottom:8px;">';
-    html+='<div style="flex:1;"><select class="form-input" onchange="opsFormCache.items['+idx+'].system=this.value">';
+    html+='<div style="flex:1;"><select class="form-input" onchange="opsFormCache.items['+idx+'].system=this.value;renderOps()">';
     html+='<option value="">Select system...</option>';
     Object.keys(sysAvail).sort().forEach(function(sys){
+      // Hide if already selected in another row
+      if(selectedSystems.indexOf(sys)>=0&&item.system!==sys) return;
       html+='<option value="'+sys+'"'+(item.system===sys?' selected':'')+'>'+sys+' ('+sysAvail[sys]+' available)</option>';
     });
     html+='</select></div>';
