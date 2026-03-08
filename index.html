@@ -6546,58 +6546,53 @@ function quickScanEntry(secId){
 }
 
 // ══ TAB NAVIGATION ══
-var _pendingTabTarget=null;
-
 document.addEventListener('keydown',function(e){
   if(e.key!=='Tab') return;
   var el=document.activeElement;
   if(!el||!el.classList.contains('tab-field')) return;
-  var container=el.closest('.section-table-scroll');
-  if(!container) container=el.closest('table');
-  if(!container) return;
-  e.preventDefault();
   
+  e.preventDefault();
+  e.stopPropagation();
+  
+  // Find position in the section
+  var secCard=el.closest('.section-card');
+  if(!secCard) return;
+  var secId=secCard.dataset.sectionId;
+  var tbody=secCard.querySelector('tbody');
+  if(!tbody) return;
+  
+  // Find current row and column
   var row=el.closest('tr');
-  if(!row) return;
-  var allRows=Array.from(container.querySelectorAll('tbody tr'));
-  var fields=[];
-  for(var r=0;r<allRows.length;r++){
-    var rowFields=Array.from(allRows[r].querySelectorAll('.tab-field:not([disabled])'));
-    rowFields.forEach(function(f){fields.push(f);});
-  }
-  var idx=fields.indexOf(el);
-  if(idx<0) return;
-  var next=e.shiftKey?idx-1:idx+1;
-  if(next>=0&&next<fields.length){
-    // Trigger change/blur on current field first
-    el.dispatchEvent(new Event('blur',{bubbles:true}));
-    el.dispatchEvent(new Event('change',{bubbles:true}));
-    // Store target position for after any DOM rebuild
-    var secCard=el.closest('.section-card');
-    var secId=secCard?secCard.dataset.sectionId:'';
-    var targetRowIdx=Math.floor(next/7);
-    var targetColIdx=next%7;
-    _pendingTabTarget={secId:secId,row:targetRowIdx,col:targetColIdx};
-    
-    // Try to focus immediately
-    setTimeout(function(){
-      if(_pendingTabTarget){
-        var t=_pendingTabTarget;
-        _pendingTabTarget=null;
-        var card=document.querySelector('.section-card[data-section-id="'+t.secId+'"]');
-        if(!card) return;
-        var tbody=card.querySelector('tbody');
-        if(!tbody) return;
-        var rows=tbody.querySelectorAll('tr');
-        if(t.row>=rows.length) return;
-        var flds=Array.from(rows[t.row].querySelectorAll('.tab-field:not([disabled])'));
-        if(t.col<flds.length){
-          flds[t.col].focus();
-          if(flds[t.col].type!=='date') flds[t.col].select();
-        }
-      }
-    },100);
-  }
+  var rows=Array.from(tbody.querySelectorAll('tr'));
+  var rowIdx=rows.indexOf(row);
+  var fields=Array.from(row.querySelectorAll('.tab-field:not([disabled])'));
+  var colIdx=fields.indexOf(el);
+  
+  // Calculate next position
+  var nextCol=e.shiftKey?colIdx-1:colIdx+1;
+  var nextRow=rowIdx;
+  var maxCols=fields.length;
+  
+  if(nextCol>=maxCols){nextCol=0;nextRow++;}
+  if(nextCol<0){nextCol=maxCols-1;nextRow--;}
+  if(nextRow<0||nextRow>=rows.length) return;
+  
+  // Save current value by triggering blur
+  el.blur();
+  
+  // Focus next field after DOM settles
+  setTimeout(function(){
+    var card=document.querySelector('.section-card[data-section-id="'+secId+'"]');
+    if(!card) return;
+    var tb=card.querySelector('tbody');
+    if(!tb) return;
+    var trs=tb.querySelectorAll('tr');
+    if(nextRow>=trs.length) return;
+    var flds=Array.from(trs[nextRow].querySelectorAll('.tab-field:not([disabled])'));
+    if(nextCol>=flds.length) return;
+    flds[nextCol].focus();
+    if(flds[nextCol].type!=='date') flds[nextCol].select();
+  },150);
 });
 
 // ══ INIT ══
