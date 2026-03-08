@@ -6546,21 +6546,20 @@ function quickScanEntry(secId){
 }
 
 // ══ TAB NAVIGATION ══
+var _pendingTabTarget=null;
+
 document.addEventListener('keydown',function(e){
   if(e.key!=='Tab') return;
   var el=document.activeElement;
   if(!el||!el.classList.contains('tab-field')) return;
-  // Stay within the current section's scroll container
   var container=el.closest('.section-table-scroll');
   if(!container) container=el.closest('table');
   if(!container) return;
   e.preventDefault();
-  // Get all tab-fields within this row first, then next rows
+  
   var row=el.closest('tr');
   if(!row) return;
   var allRows=Array.from(container.querySelectorAll('tbody tr'));
-  var rowIdx=allRows.indexOf(row);
-  // Build ordered field list: all fields in current row, then next row, etc.
   var fields=[];
   for(var r=0;r<allRows.length;r++){
     var rowFields=Array.from(allRows[r].querySelectorAll('.tab-field:not([disabled])'));
@@ -6570,8 +6569,35 @@ document.addEventListener('keydown',function(e){
   if(idx<0) return;
   var next=e.shiftKey?idx-1:idx+1;
   if(next>=0&&next<fields.length){
-    fields[next].focus();
-    if(fields[next].type!=='date') fields[next].select();
+    // Trigger change on current field first
+    if(el.value!==el.defaultValue){
+      el.dispatchEvent(new Event('change',{bubbles:true}));
+    }
+    // Store target position for after any DOM rebuild
+    var secCard=el.closest('.section-card');
+    var secId=secCard?secCard.dataset.sectionId:'';
+    var targetRowIdx=Math.floor(next/7);
+    var targetColIdx=next%7;
+    _pendingTabTarget={secId:secId,row:targetRowIdx,col:targetColIdx};
+    
+    // Try to focus immediately
+    setTimeout(function(){
+      if(_pendingTabTarget){
+        var t=_pendingTabTarget;
+        _pendingTabTarget=null;
+        var card=document.querySelector('.section-card[data-section-id="'+t.secId+'"]');
+        if(!card) return;
+        var tbody=card.querySelector('tbody');
+        if(!tbody) return;
+        var rows=tbody.querySelectorAll('tr');
+        if(t.row>=rows.length) return;
+        var flds=Array.from(rows[t.row].querySelectorAll('.tab-field:not([disabled])'));
+        if(t.col<flds.length){
+          flds[t.col].focus();
+          if(flds[t.col].type!=='date') flds[t.col].select();
+        }
+      }
+    },100);
   }
 });
 
