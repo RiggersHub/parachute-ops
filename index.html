@@ -524,8 +524,8 @@
   </div>
   <div style="padding:0 24px;">
     <div style="display:flex;gap:8px;margin-bottom:16px;">
-      <button class="btn btn-primary" id="opsModePackBtn" onclick="setOpsMode('pack')" style="flex:1;">Mode 1: PACK</button>
-      <button class="btn btn-secondary" id="opsModeOutBtn" onclick="setOpsMode('signout')" style="flex:1;">Mode 2: SIGN OUT</button>
+      <button class="btn btn-secondary" id="opsModePackBtn" disabled style="flex:1;opacity:0.5;" title="Use Quick Entry in Rigger Pack Records">Mode 1: PACK (in RPR)</button>
+      <button class="btn btn-primary" id="opsModeOutBtn" onclick="setOpsMode('signout')" style="flex:1;">Mode 2: SIGN OUT</button>
       <button class="btn btn-secondary" id="opsModeInBtn" onclick="setOpsMode('signin')" style="flex:1;">Mode 3: SIGN IN</button>
     </div>
     <div id="opsContent"></div>
@@ -2161,8 +2161,7 @@ function delEquipSysEntry(eq,sys,idx){
     save(); renderUnifiedBar();
   }
 }
-function addEquipEntry(eq){}
-function delEquipEntry(eq,idx){}
+// removed duplicate stubs
 function addStatusSystem(sys,catKey){
   if(!sys) return;
   if(!S.statusCounts[sys]) S.statusCounts[sys]={};
@@ -2502,6 +2501,11 @@ function sectionHTML(sec){
           <button class="btn btn-secondary btn-sm" onclick="printPackLog(${sec.id})">🖨 Pack Log</button>
           <button class="btn btn-secondary btn-sm" onclick="printFISheet(${sec.id})">🖨 FI Sheet</button>
         </div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);margin-bottom:6px;">
+        <span style="font-size:11px;font-weight:600;color:var(--text-muted);white-space:nowrap;">Quick Entry:</span>
+        <input type="text" class="form-input" id="qscan-${sec.id}" placeholder="Scan/type S/N..." style="flex:1;font-size:13px;padding:6px 10px;" onkeydown="if(event.key==='Enter')quickScanEntry(${sec.id})">
+        <button class="btn btn-primary btn-sm" onclick="quickScanEntry(${sec.id})">Add</button>
       </div>
       <div class="section-table-scroll" id="scroll-${sec.id}"><table class="data-table">
         <thead><tr>
@@ -5631,67 +5635,6 @@ function showBarcodeGenerator(){
      }}]);
 }
 
-function generateBarcodes(type,format,size,secFilter){
-  var items=[];
-  if(type==='serials'||type==='both'){
-    if(secFilter){
-      var sec=S.sections.find(function(s){return s.id==secFilter;});
-      if(sec) sec.rows.forEach(function(r){if(r.serialNumber) items.push({value:r.serialNumber,label:r.serialNumber,type:sec.systemType});});
-    } else {
-      Object.keys(S.masterInventory||{}).forEach(function(sn){if(sn) items.push({value:sn,label:sn,type:'S/N'});});
-      S.sections.forEach(function(sec){sec.rows.forEach(function(r){
-        if(r.serialNumber&&!items.find(function(x){return x.value===r.serialNumber;})) items.push({value:r.serialNumber,label:r.serialNumber,type:sec.systemType});
-      });});
-    }
-  }
-  if(type==='dbags'||type==='both'){
-    S.sections.forEach(function(sec){
-      if(secFilter&&sec.id!=secFilter) return;
-      sec.rows.forEach(function(r){
-        if(r.dbag&&!items.find(function(x){return x.value===r.dbag;})) items.push({value:r.dbag,label:r.dbag,type:'D-Bag'});
-      });
-    });
-  }
-  if(items.length===0){toast('No items to generate','warning');return;}
-  
-  var cols,bH,bW,fs;
-  if(size==='small'){cols=3;bW=1.2;bH=40;fs=9;}
-  else if(size==='medium'){cols=2;bW=1.5;bH=50;fs=11;}
-  else{cols=2;bW=2;bH=60;fs=13;}
-  
-  var body='<style>.bc-grid{display:grid;grid-template-columns:repeat('+cols+',1fr);gap:4px;padding:10px;}.bc-cell{text-align:center;padding:4px;border:1px dashed #ccc;page-break-inside:avoid;}.bc-cell svg{display:block;margin:0 auto;}.bc-lbl{font-size:'+fs+'px;font-weight:600;margin-top:2px;color:#111 !important;}.bc-type{font-size:'+(fs-2)+'px;color:#666 !important;}</style>';
-  body+='<h1 style="font-size:16px;margin-bottom:4px;">Barcode Labels</h1>';
-  body+='<div class="header-info">'+items.length+' labels \u00b7 Format: '+format+' \u00b7 Generated: '+new Date().toLocaleDateString()+'</div>';
-  body+='<div class="bc-grid">';
-  items.forEach(function(item,idx){
-    body+='<div class="bc-cell"><svg id="bc-'+idx+'"></svg><div class="bc-lbl">'+esc(item.label)+'</div><div class="bc-type">'+esc(item.type)+'</div></div>';
-  });
-  body+='</div>';
-  
-  openPrintPreview('Barcode Labels', body);
-  
-  setTimeout(function(){
-    var pc=document.querySelector('.print-content');
-    if(!pc) return;
-    items.forEach(function(item,idx){
-      var svg=pc.querySelector('#bc-'+idx);
-      if(svg&&window.JsBarcode){
-        try{JsBarcode(svg,item.value,{format:format,width:bW,height:bH,displayValue:false,margin:2});}
-        catch(e){svg.outerHTML='<span style="color:red;font-size:10px;">Invalid: '+esc(item.value)+'</span>';}
-      }
-    });
-  },500);
-}
-
-
-
-// ══ OPERATIONS SYSTEM v3 ══
-// Key principle: sign-out MARKS chutes as signed out in their rows
-// Sign-in CLEARS that mark. Chutes never leave their section.
-// A row with _signedOut=true is excluded from packed counts.
-
-var opsMode='pack';
-var opsFormCache={unit:'',date:'',items:[]};
 
 function opsFormSave(){
   var unit=document.getElementById('opsOutUnit');
@@ -5699,6 +5642,9 @@ function opsFormSave(){
   if(unit) opsFormCache.unit=unit.value;
   if(date) opsFormCache.date=date.value;
 }
+
+var opsMode='signout';
+var opsFormCache={unit:'',date:'',items:[]};
 
 function clearScanOutState(){_activeScanOutIdx=null;sessionStorage.removeItem('pms_scanOutIdx');renderOps();}
 function clearSignInState(){_activeSignInIdx=null;sessionStorage.removeItem('pms_signInIdx');renderOps();}
@@ -6519,6 +6465,84 @@ function openBarcodePreview(serialNumbers){
   body+='</div>';
   body+='<div class="footer">Parachute Management System \u2014 Barcode Labels</div>';
   openPrintPreview('Barcode Labels ('+serialNumbers.length+')', body);
+}
+
+// ══ QUICK SCAN ENTRY (RPR) ══
+function quickScanEntry(secId){
+  var inp=document.getElementById('qscan-'+secId);
+  if(!inp) return;
+  var sn=inp.value.trim();
+  if(!sn) return;
+  inp.value='';
+  inp.focus();
+  
+  var sec=S.sections.find(function(x){return x.id===secId;});
+  if(!sec) return;
+  
+  // Check if section is full
+  if(sec.rows.length>=sec.maxChutes){
+    toast('Section full ('+sec.maxChutes+' max)','warning');
+    return;
+  }
+  
+  // Check if S/N already exists in this section
+  if(sec.rows.find(function(r){return r.serialNumber===sn;})){
+    toast(sn+' already in this section','warning');
+    return;
+  }
+  
+  // Check for duplicates across all sections
+  var dupe=null;
+  S.sections.forEach(function(s){
+    s.rows.forEach(function(r){
+      if(r.serialNumber===sn) dupe={bin:s.binLocation,sys:s.systemType};
+    });
+  });
+  if(dupe){
+    toast(sn+' already exists in '+dupe.bin+' ('+dupe.sys+')','error');
+    return;
+  }
+  
+  // Build new row with auto-populated data from master inventory
+  var row={serialNumber:sn,dom:'',pis:'',osd:'',dbag:'',packer:'',ip:'',packDate:new Date().toISOString().split('T')[0],expirationDate:''};
+  
+  // Auto-populate from master inventory
+  if(S.masterInventory[sn]){
+    var inv=S.masterInventory[sn];
+    if(inv.dom) row.dom=inv.dom;
+    if(inv.pis) row.pis=inv.pis;
+    row.osd=calcOSDString(row.dom,row.pis);
+  } else {
+    // Add to master inventory
+    S.masterInventory[sn]={dom:'',pis:'',osd:''};
+  }
+  
+  // Calculate expiration from pack date
+  var days=CFG[sec.systemType]?CFG[sec.systemType].expDays:182;
+  var exp=new Date();
+  exp.setDate(exp.getDate()+days);
+  row.expirationDate=exp.toISOString().split('T')[0];
+  
+  sec.rows.push(row);
+  save();
+  renderSections();
+  
+  // Scroll to the new row and expand section
+  var card=document.querySelector('.section-card[data-section-id="'+secId+'"]');
+  if(card){
+    card.classList.remove('collapsed');
+    // Expand the scroll container
+    var scroll=document.getElementById('scroll-'+secId);
+    if(scroll) scroll.classList.add('expanded');
+  }
+  
+  toast(sn+' added — fill in D-bag, Packer, IP','success',3000);
+  
+  // Re-focus the scan input after render
+  setTimeout(function(){
+    var newInp=document.getElementById('qscan-'+secId);
+    if(newInp) newInp.focus();
+  },200);
 }
 
 // ══ TAB NAVIGATION ══
