@@ -3,8 +3,6 @@ const ASSETS = [
   '/parachute-ops/',
   '/parachute-ops/index.html',
   '/parachute-ops/manifest.json',
-  '/parachute-ops/icon-192.png',
-  '/parachute-ops/icon-512.png'
 ];
 
 // Install - cache core assets
