@@ -7028,9 +7028,38 @@ function openBarcodeScanner(callback){
     // Vibrate if supported
     if(navigator.vibrate) navigator.vibrate(100);
     
+    // Check if this serial exists anywhere in the system
+    var found=false;
+    var location='';
+    S.sections.forEach(function(sec){
+      sec.rows.forEach(function(r){
+        if(r.serialNumber===code){found=true;location=sec.binLocation+' ('+sec.systemType+')';}
+      });
+    });
+    if(!found && S.masterInventory && S.masterInventory[code]){
+      found=true;location='Inventory (not in a section)';
+    }
+    // Check signed out
+    if(!found){
+      (S.signedOut||[]).forEach(function(so){
+        (so.scannedOut||[]).forEach(function(s){
+          if(s.sn===code){found=true;location='Signed out to '+(so.unit||'?');}
+        });
+      });
+    }
+    
     // Close and callback
     closeBarcodeScanner();
     if(_scanCallback) _scanCallback(code);
+    
+    // Show status toast after callback processes
+    setTimeout(function(){
+      if(found){
+        toast(code+' found: '+location,'info',3000);
+      } else {
+        toast(code+' not found in system - new serial number','warning',4000);
+      }
+    },300);
   });
 }
 
