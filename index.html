@@ -3050,7 +3050,8 @@ function savePreviewToArchive(){
   }
   
   save();
-  toast('Saved to archive: '+label,'success');
+  renderArchive();
+  toast('Saved to archive: '+label+'. Check the Archive tab.','success',5000);
   
   // Hide the button after saving
   var btn=document.getElementById('saveArchiveBtn');
@@ -3294,14 +3295,13 @@ function updateFINameFields(){
 function generateFISheet(secId){
   const s=S.sections.find(x=>x.id===secId); if(!s)return;
   const now=new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
-  const earliest=getEarliestExpiration(s);
 
   // Get FI names
   const nameInputs=document.querySelectorAll('.fi-name-input');
   const fiNames=Array.from(nameInputs).map(el=>el.value.trim()).filter(n=>n);
   const fiCount=fiNames.length||1;
 
-  // Check FI role conflicts with packers/IPs
+  // Check FI role conflicts
   if(fiNames.length>0){
     const conflict=checkFIConflict(secId, fiNames);
     if(conflict){
@@ -3312,45 +3312,57 @@ function generateFISheet(secId){
     }
   }
 
-  // Build FI display string: "Joe" or "Joe / Maria"
   const fiDisplay=fiNames.length>0?fiNames.join(' / '):'';
+  const fiHeader=fiDisplay?'FI: '+fiDisplay:'FI';
 
-  let body=`<h1>Final Inspector (FI) Sheet</h1>`;
-  body+=`<div class="header-info">
-    <strong>Bin:</strong> ${s.binLocation} &nbsp;|&nbsp; <strong>System:</strong> ${s.systemType} &nbsp;|&nbsp;
-    <strong>Chutes:</strong> ${s.rows.length} / ${s.maxChutes} &nbsp;|&nbsp;
-    <strong>Printed:</strong> ${now}`;
-  if(earliest){
-    body+=` &nbsp;|&nbsp; <strong>Expiration:</strong> <span class="${printExpClass(earliest.expirationDate)}">${fmtPrintDate(earliest.expirationDate)}</span>`;
-  }
-  body+=`</div>`;
-
-  // FI column header shows the names
-  const fiHeader=fiDisplay?`FI: ${fiDisplay}`:'FI';
-
-  body+=`<table><thead><tr>
-    <th>#</th><th>Serial Number</th><th>DOM</th><th>PIS</th><th>OSD</th><th>D-Bag #</th><th>Packer</th><th>IP</th><th>Pack Date</th><th>${fiHeader}</th>
-  </tr></thead><tbody>`;
-  s.rows.forEach((r,i)=>{
-    body+=`<tr><td>${i+1}</td><td>${r.serialNumber||'—'}</td><td>${r.dom||'—'}</td><td>${r.pis||'—'}</td><td>${r.osd||'—'}</td><td>${r.dbag||'—'}</td><td>${r.packer||'—'}</td><td>${r.ip||'—'}</td><td>${fmtPrintDate(r.packDate)}</td><td style="min-width:70px;"><div style="border-bottom:1px solid #999;height:16px;"></div></td></tr>`;
+  // Group rows by pack date
+  var byDate={};
+  s.rows.forEach(function(r){
+    var pd=r.packDate||'No Date';
+    if(!byDate[pd]) byDate[pd]=[];
+    byDate[pd].push(r);
   });
-  body+=`</tbody></table>`;
+  var dates=Object.keys(byDate).sort();
 
-  // Signature blocks for each FI
-  for(let i=0;i<fiCount;i++){
-    const name=(fiNames[i]||'_____________').toUpperCase();
-    body+=`<div class="sig-line" style="margin-top:${i===0?'30':'20'}px;">
-      <div class="sig-block"><div class="sig-label">FI #${i+1} Name</div><div style="font-size:14px;font-weight:700;text-align:center;">${name}</div><div class="sig-field"></div></div>
-      <div class="sig-block"><div class="sig-label">Signature</div><div class="sig-field" style="margin-top:22px;"></div></div>
-      <div class="sig-block"><div class="sig-label">Date</div><div class="sig-field" style="margin-top:22px;"></div></div>
-    </div>`;
-  }
+  var body='';
+  dates.forEach(function(date,di){
+    if(di>0) body+='<div style="page-break-before:always;"></div>';
+    var rows=byDate[date];
+    var dateDisplay=date==='No Date'?'No Date':new Date(date+'T00:00:00').toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
+    
+    body+='<h1>Final Inspector (FI) Sheet</h1>';
+    body+='<div class="header-info">';
+    body+='<strong>Bin:</strong> '+s.binLocation+' &nbsp;|&nbsp; <strong>System:</strong> '+s.systemType+' &nbsp;|&nbsp; ';
+    body+='<strong>Pack Date:</strong> '+dateDisplay+' &nbsp;|&nbsp; ';
+    body+='<strong>Chutes:</strong> '+rows.length+' &nbsp;|&nbsp; ';
+    body+='<strong>Printed:</strong> '+now;
+    body+='</div>';
 
-  body+=`<div class="footer">Parachute Management System — FI Sheet Generated ${now}</div>`;
-  openPrintPreview(`FI Sheet — ${s.binLocation}`, body, {label:new Date().toLocaleDateString('en-US',{month:'long',year:'numeric'}),sectionData:{binLocation:s.binLocation,systemType:s.systemType,maxChutes:s.maxChutes,rowCount:s.rows.length,rows:s.rows.map(function(r){return{serialNumber:r.serialNumber,dom:r.dom,pis:r.pis,osd:r.osd,dbag:r.dbag,packer:r.packer,ip:r.ip,packDate:r.packDate,expirationDate:r.expirationDate};})}});
+    body+='<table><thead><tr>';
+    body+='<th>#</th><th>Serial Number</th><th>DOM</th><th>PIS</th><th>OSD</th><th>D-Bag #</th><th>Packer</th><th>IP</th><th>Pack Date</th><th>'+fiHeader+'</th>';
+    body+='</tr></thead><tbody>';
+    rows.forEach(function(r,ri){
+      body+='<tr><td>'+(ri+1)+'</td><td>'+(r.serialNumber||'\u2014')+'</td><td>'+(r.dom||'\u2014')+'</td><td>'+(r.pis||'\u2014')+'</td><td>'+(r.osd||'\u2014')+'</td><td>'+(r.dbag||'\u2014')+'</td><td>'+(r.packer||'\u2014')+'</td><td>'+(r.ip||'\u2014')+'</td><td>'+fmtPrintDate(r.packDate)+'</td><td style="min-width:70px;"><div style="border-bottom:1px solid #999;height:16px;"></div></td></tr>';
+    });
+    body+='</tbody></table>';
+
+    // Signature blocks for each FI
+    for(var fi=0;fi<fiCount;fi++){
+      var name=(fiNames[fi]||'_____________').toUpperCase();
+      body+='<div class="sig-line" style="margin-top:'+(fi===0?'30':'20')+'px;">';
+      body+='<div class="sig-block"><div class="sig-label">FI #'+(fi+1)+' Name</div><div style="font-size:14px;font-weight:700;text-align:center;">'+name+'</div><div class="sig-field"></div></div>';
+      body+='<div class="sig-block"><div class="sig-label">Signature</div><div class="sig-field" style="margin-top:22px;"></div></div>';
+      body+='<div class="sig-block"><div class="sig-label">Date</div><div class="sig-field" style="margin-top:22px;"></div></div>';
+      body+='</div>';
+    }
+  });
+
+  body+='<div class="footer">Parachute Management System \u2014 FI Sheet Generated '+now+'</div>';
+
+  var _archData={label:new Date().toLocaleDateString('en-US',{month:'long',year:'numeric'}),sectionData:{binLocation:s.binLocation,systemType:s.systemType,maxChutes:s.maxChutes,rowCount:s.rows.length,rows:s.rows.map(function(r){return{serialNumber:r.serialNumber,dom:r.dom,pis:r.pis,osd:r.osd,dbag:r.dbag,packer:r.packer,ip:r.ip,packDate:r.packDate,expirationDate:r.expirationDate};})}};
+  openPrintPreview('FI Sheet \u2014 '+s.binLocation+(dates.length>1?' ('+dates.length+' days)':''), body, _archData);
 }
 
-var _previewArchiveData=null;
 function openPrintPreview(title, bodyContent, archiveData){
   _previewArchiveData=archiveData||null;
   let existing=document.getElementById('printPreviewOverlay');
