@@ -440,6 +440,7 @@
       <button class="nav-tab" data-page="inventory">Inventory</button>
       <button class="nav-tab" data-page="csvupload">Upload Files</button>
       <button class="nav-tab" data-page="admin">Admin</button>
+      <button class="btn btn-secondary" onclick="syncFromCloud()" style="padding:4px 8px;font-size:10px;margin-left:auto;" title="Sync from cloud">🔄 Sync</button>
     </div>
   </div>
 </div>
@@ -649,7 +650,6 @@ function load(){
       Object.assign(S,parsed);
     }
   }catch(e){}
-  auditLog('export','Data Import','Imported backup data');
   // Ensure all required properties exist
   if(!S.sections) S.sections=[];
   if(!S.signedOut) S.signedOut=[];
@@ -1365,13 +1365,31 @@ async function loadFromDB() {
     };
   });
   
-  // Signed out
-  S.signedOut = (result.signedOut || []).map(so => ({
-    unit: so.unit_name || '',
-    system: so.system || '',
-    count: so.count || '',
-    _dbId: so.id
-  }));
+  // Restore extra state blob
+  var stateRow = (result.signedOut || []).find(function(so){return so.unit_name === '__state__';});
+  if(stateRow && stateRow.full_data){
+    try{
+      var extra=JSON.parse(stateRow.full_data);
+      if(extra.monthlySnapshots) S.monthlySnapshots=extra.monthlySnapshots;
+      if(extra.archive) S.archive=extra.archive;
+      if(extra.abnOps) S.abnOps=extra.abnOps;
+      if(extra.capacityT11) S.capacityT11=extra.capacityT11;
+      if(extra.capacityMC6) S.capacityMC6=extra.capacityMC6;
+      if(extra.capacityRA1) S.capacityRA1=extra.capacityRA1;
+    }catch(e){}
+  }
+  
+  // Signed out - restore full data if available
+  S.signedOut = (result.signedOut || []).filter(function(so){return so.unit_name !== '__state__';}).map(function(so){
+    if(so.full_data){
+      try{
+        var full=JSON.parse(so.full_data);
+        full._dbId=so.id;
+        return full;
+      }catch(e){}
+    }
+    return {unit:so.unit_name||'',system:so.system||'',count:so.count||'',_dbId:so.id};
+  });
   
   // Keep nextSectionId high enough
   if (S.sections.length > 0) {
@@ -1508,17 +1526,36 @@ async function saveToDB() {
       await sbClient.from('pms_equipment_counts').insert(ecRows);
     }
     
-    // ── Save signed out ──
+    // ── Save signed out (full JSON) ──
     await sbClient.from('pms_signed_out').delete().eq('unit_id', activeUnitId);
-    var soRows = (S.signedOut || []).filter(so => so.unit || so.system || so.count).map(so => ({
+    var soRows = (S.signedOut || []).filter(so => so.unit || so.system || so.count || so.totalQty).map(so => ({
       unit_id: activeUnitId,
       unit_name: so.unit || '',
       system: so.system || '',
-      count: so.count || ''
+      count: so.count || so.totalQty || '',
+      full_data: JSON.stringify(so)
     }));
     if (soRows.length > 0) {
       await sbClient.from('pms_signed_out').insert(soRows);
     }
+    
+    // ── Save extra state as JSON blob ──
+    var extraState = {
+      monthlySnapshots: S.monthlySnapshots || [],
+      archive: S.archive || {deletedSections:[],deletedRows:[]},
+      abnOps: S.abnOps || [],
+      capacityT11: S.capacityT11 || 0,
+      capacityMC6: S.capacityMC6 || 0,
+      capacityRA1: S.capacityRA1 || 0
+    };
+    await sbClient.from('pms_signed_out').delete().eq('unit_id', activeUnitId).eq('unit_name', '__state__');
+    await sbClient.from('pms_signed_out').insert({
+      unit_id: activeUnitId,
+      unit_name: '__state__',
+      system: '',
+      count: '',
+      full_data: JSON.stringify(extraState)
+    });
   });
 }
 
@@ -6900,6 +6937,29 @@ function showChuteHistory(sn){
   showConfirm('Chute History: '+sn, html, [{label:'Close',cls:'btn-secondary',fn:function(){}}]);
 }
 
+
+
+async function syncFromCloud(){
+  if(!sbClient||!activeUnitId){toast('Not connected to database','warning');return;}
+  toast('Syncing from cloud...','info',2000);
+  var success=await loadFromDB();
+  if(success){
+    try{localStorage.setItem(getStorageKey(),JSON.stringify(S));}catch(e){}
+    renderAll();
+    toast('Synced from cloud','success');
+  } else {
+    toast('Sync failed','error');
+  }
+}
+
+function renderAll(){
+  try{renderHome();}catch(e){}
+  try{renderSections();}catch(e){}
+  try{renderPSR();}catch(e){}
+  try{renderArchive();}catch(e){}
+  try{renderInventory();}catch(e){}
+  try{updateUserDisplay();}catch(e){}
+}
 
 // ══ BARCODE CAMERA SCANNER ══
 var _scanCallback=null;
