@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1.8.4/dist/quagga.min.js"></script>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#6366f1">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -2512,6 +2513,7 @@ function sectionHTML(sec){
       <div style="display:flex;gap:6px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);margin-bottom:6px;">
         <span style="font-size:11px;font-weight:600;color:var(--text-muted);white-space:nowrap;">Quick Entry:</span>
         <input type="text" class="form-input" id="qscan-${sec.id}" placeholder="Scan/type S/N..." style="flex:1;font-size:13px;padding:6px 10px;" onkeydown="if(event.key==='Enter')quickScanEntry(${sec.id})">
+        <button class="btn btn-secondary btn-sm" onclick="openBarcodeScanner(function(code){document.getElementById('qscan-${sec.id}').value=code;quickScanEntry(${sec.id})})" title="Camera scan" style="padding:6px 8px;">\u{1F4F7}</button>
         <button class="btn btn-primary btn-sm" onclick="quickScanEntry(${sec.id})">Add</button>
       </div>
       <div class="section-table-scroll" id="scroll-${sec.id}"><table class="data-table">
@@ -6896,6 +6898,94 @@ function showChuteHistory(sn){
   html+='</div>';
   
   showConfirm('Chute History: '+sn, html, [{label:'Close',cls:'btn-secondary',fn:function(){}}]);
+}
+
+
+// ══ BARCODE CAMERA SCANNER ══
+var _scanCallback=null;
+var _scanActive=false;
+
+function openBarcodeScanner(callback){
+  if(_scanActive) return;
+  _scanCallback=callback;
+  _scanActive=true;
+  
+  // Create scanner overlay
+  var overlay=document.createElement('div');
+  overlay.id='scannerOverlay';
+  overlay.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.95);z-index:10000;display:flex;flex-direction:column;align-items:center;justify-content:center;';
+  
+  overlay.innerHTML='<div style="color:#fff;font-size:16px;font-weight:600;margin-bottom:12px;">Scan Barcode</div>'+
+    '<div id="scannerViewport" style="width:90%;max-width:400px;height:300px;border:2px solid #6366f1;border-radius:8px;overflow:hidden;position:relative;background:#000;">'+
+    '<div style="position:absolute;top:50%;left:10%;right:10%;height:2px;background:rgba(239,68,68,0.7);z-index:1;"></div>'+
+    '</div>'+
+    '<div id="scannerResult" style="color:#6366f1;font-size:14px;font-weight:600;margin-top:12px;min-height:20px;"></div>'+
+    '<div style="margin-top:16px;display:flex;gap:12px;">'+
+    '<button onclick="closeBarcodeScanner()" style="padding:10px 24px;background:#374151;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;">Cancel</button>'+
+    '</div>';
+  
+  document.body.appendChild(overlay);
+  
+  // Start Quagga
+  if(typeof Quagga==='undefined'){
+    document.getElementById('scannerResult').textContent='Scanner library not loaded. Type manually.';
+    return;
+  }
+  
+  Quagga.init({
+    inputStream:{
+      name:"Live",
+      type:"LiveStream",
+      target:document.getElementById('scannerViewport'),
+      constraints:{
+        facingMode:"environment",
+        width:{ideal:640},
+        height:{ideal:480}
+      }
+    },
+    decoder:{
+      readers:["code_128_reader","code_39_reader","ean_reader","ean_8_reader"]
+    },
+    locate:true,
+    frequency:10
+  }, function(err){
+    if(err){
+      console.log('Scanner error:',err);
+      document.getElementById('scannerResult').textContent='Camera error: '+err.message;
+      return;
+    }
+    Quagga.start();
+  });
+  
+  Quagga.onDetected(function(result){
+    var code=result.codeResult.code;
+    if(!code) return;
+    
+    // Show result briefly
+    var el=document.getElementById('scannerResult');
+    if(el) el.textContent='Scanned: '+code;
+    
+    // Vibrate if supported
+    if(navigator.vibrate) navigator.vibrate(100);
+    
+    // Close and callback
+    closeBarcodeScanner();
+    if(_scanCallback) _scanCallback(code);
+  });
+}
+
+function closeBarcodeScanner(){
+  _scanActive=false;
+  try{Quagga.stop();}catch(e){}
+  try{Quagga.offDetected();}catch(e){}
+  var overlay=document.getElementById('scannerOverlay');
+  if(overlay) overlay.remove();
+  _scanCallback=null;
+}
+
+// Helper to add scan button next to an input
+function addScanButton(inputId, secId){
+  return '<button class="btn btn-secondary" style="padding:4px 8px;font-size:12px;" onclick="openBarcodeScanner(function(code){var inp=document.getElementById(\''+inputId+'\');if(inp){inp.value=code;inp.dispatchEvent(new Event(\'change\',{bubbles:true}));}})" title="Scan barcode">\u{1F4F7}</button>';
 }
 
 // ══ TAB NAVIGATION ══
