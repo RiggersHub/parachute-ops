@@ -1897,7 +1897,7 @@ function showAddUser(){
   showConfirm('Add User',
     '<div style="text-align:left;">'+
     '<div class="form-group"><label class="form-label">Last Name</label><input type="text" class="form-input" id="newUserLast" placeholder="Last name"></div>'+
-    '<div class="form-group"><label class="form-label">Role</label><select class="form-input" id="newUserRole"><option value="rigger">Rigger</option><option value="admin">Admin</option><option value="viewer">Viewer</option>'+(currentUser&&currentUser.role==="masteradmin"?'<option value="masteradmin">Master Admin</option>':'')+'</select></div>'+
+    '<div class="form-group"><label class="form-label">Role</label><select class="form-input" id="newUserRole"><option value="rigger">Rigger</option><option value="admin">Admin</option><option value="viewer">Viewer</option></select></div>'+
     '<div class="form-group"><label class="form-label">PIN (4-10 digits)</label><input type="text" class="form-input" id="newUserPin" placeholder="PIN" maxlength="10"></div>'+
     '</div>',
     [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
