@@ -402,6 +402,7 @@
     <div class="login-error" id="loginError"></div>
     <button class="login-btn" onclick="doLogin()">Sign In</button>
     <div style="margin-top:14px;"><button onclick="showCreateAccount()" style="background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;text-decoration:underline;font-family:inherit;">Create New Account</button></div>
+    <div style="margin-top:10px;"><button onclick="newParaRequest()" style="background:var(--accent);border:none;color:#fff;font-size:13px;cursor:pointer;font-family:inherit;padding:8px 20px;border-radius:6px;font-weight:600;width:100%;">Request Parachutes</button></div>
   </div>
   <div class="login-box" id="createPanel" style="display:none;">
     <h2>Create Account</h2>
@@ -437,6 +438,7 @@
       <button class="nav-tab" data-page="weekly">Weekly Data Report</button>
       <button class="nav-tab" data-page="archive">Archived Records</button>
       <button class="nav-tab" data-page="ops">Issue &amp; Return</button>
+      <button class="nav-tab" data-page="requests">Requests</button>
       <button class="nav-tab" data-page="inventory">Inventory</button>
       <button class="nav-tab" data-page="csvupload">Upload Files</button>
       <button class="nav-tab" data-page="admin">Admin</button>
@@ -527,6 +529,11 @@
 <datalist id="bin-datalist"></datalist>
 
 <!-- Admin Page -->
+<div id="page-requests" style="display:none;">
+  <div class="page-header"><h1 class="page-title">Parachute Requests</h1></div>
+  <div id="requestsContent" style="padding:0 24px;"></div>
+</div>
+
 <div id="page-ops" style="display:none;">
   <div class="page-header">
     <h1 class="page-title">Issue &amp; Return</h1>
@@ -1030,6 +1037,7 @@ document.querySelectorAll('.nav-tab').forEach(tab=>{ tab.addEventListener('click
   if(tab.dataset.page==='psr') renderPSR();
   if(tab.dataset.page==='weekly') renderWeekly();
   if(tab.dataset.page==='ops') renderOps();
+  if(tab.dataset.page==='requests') renderRequests();
   if(tab.dataset.page==='inventory') renderInventory();
   if(tab.dataset.page==='csvupload') renderCSVUpload();
   if(tab.dataset.page==='admin') renderAdmin();
@@ -1746,6 +1754,11 @@ function doLogin(){
   if(!user){err.textContent='Last name not found. Click "Create New Account" below.';err.style.display='block';return;}
   if(user.pin!==pin.value){err.textContent='Incorrect PIN';err.style.display='block';return;}
   err.style.display='none';
+  if(user.role==='pending'){
+    err.textContent='Your account is pending approval. Contact an admin.';
+    err.style.display='block';
+    return;
+  }
   currentUser={name:user.name, lastName:user.lastName||user.name, role:user.role, loginTime:new Date().toISOString()};
   sessionStorage.setItem('pms_session',JSON.stringify(currentUser));
   document.getElementById('loginOverlay').style.display='none';
@@ -1794,7 +1807,7 @@ function doCreateAccount(){
     err.textContent='Last name already registered';err.style.display='block';return;
   }
 
-  users.push({name:username, lastName:lastName, role:'rigger', pin:pin});
+  users.push({name:username, lastName:lastName, role:'pending', pin:pin});
   saveUsers(users);
   populateLoginDropdown();
 
@@ -1879,7 +1892,7 @@ setInterval(function(){
 }, 5000);
 function hasRole(minRole){
   if(!currentUser) return false;
-  var roles={masteradmin:4,admin:3,rigger:2,viewer:1};
+  var roles={masteradmin:4,admin:3,rigger:2,pending:0};
   return (roles[currentUser.role]||0)>=(roles[minRole]||0);
 }
 function requireRole(minRole){
@@ -1897,7 +1910,7 @@ function showAddUser(){
   showConfirm('Add User',
     '<div style="text-align:left;">'+
     '<div class="form-group"><label class="form-label">Last Name</label><input type="text" class="form-input" id="newUserLast" placeholder="Last name"></div>'+
-    '<div class="form-group"><label class="form-label">Role</label><select class="form-input" id="newUserRole"><option value="rigger">Rigger</option><option value="admin">Admin</option><option value="viewer">Viewer</option></select></div>'+
+    '<div class="form-group"><label class="form-label">Role</label><select class="form-input" id="newUserRole"><option value="rigger">Rigger</option><option value="admin">Admin</option></select></div>'+
     '<div class="form-group"><label class="form-label">PIN (4-10 digits)</label><input type="text" class="form-input" id="newUserPin" placeholder="PIN" maxlength="10"></div>'+
     '</div>',
     [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
@@ -1932,7 +1945,7 @@ function editUserRole(name){
   if(!user) return;
   var roleOpts='<option value="rigger"'+(user.role==='rigger'?' selected':'')+'>Rigger</option>'
     +'<option value="admin"'+((user.role==='admin'||user.role==='masteradmin')?' selected':'')+'>Admin</option>'
-    +'<option value="viewer"'+(user.role==='viewer'?' selected':'')+'>Viewer</option>';
+    ;
   showConfirm('Edit '+(user.lastName||name),
     '<div style="text-align:left;">'+
     '<div class="form-group"><label class="form-label">Last Name</label><input type="text" class="form-input" id="editLastName" value="'+(user.lastName||user.name)+'" placeholder="Last name"></div>'+
@@ -2096,6 +2109,28 @@ function exportAuditLog(){
 
   
 
+
+function approveUser(userName){
+  var users=getUsers();
+  var user=users.find(function(u){return u.name===userName;});
+  if(!user) return;
+  user.role='rigger';
+  saveUsers(users);
+  if(sbClient) saveUsersDB();
+  auditLog('config','User Approved','Approved user: '+userName);
+  renderAdmin();
+  toast(userName+' approved as rigger','success');
+}
+
+function updateUserEmail(userName,email){
+  var users=getUsers();
+  var user=users.find(function(u){return u.name===userName;});
+  if(!user) return;
+  user.email=email.trim();
+  saveUsers(users);
+  if(sbClient) saveUsersDB();
+}
+
 function toggleUnitAccess(userName, unitId, granted){
   var users=getUsers();
   var user=users.find(function(u){return u.name===userName;});
@@ -2121,7 +2156,7 @@ function renderAdmin(){
     
     // Single unified user table
     html+='<table class="data-table" style="font-size:12px;"><thead><tr>';
-    html+='<th>Name</th><th>Role</th>';
+    html+='<th>Name</th><th>Role</th><th>Email</th>';
     if(allUnits.length>0){
       allUnits.forEach(function(u){
         var uname=u.name||u.unitName||u.id;
@@ -2133,11 +2168,16 @@ function renderAdmin(){
     users.forEach(function(u){
       var isAdm=u.role==='admin'||u.role==='masteradmin';
       var access=u.unitAccess||[];
-      var roleLabel=u.role==='masteradmin'?'admin':u.role;
+      var roleLabel=u.role==='masteradmin'?'admin':u.role==='pending'?'pending':u.role;
       
       html+='<tr>';
       html+='<td style="font-weight:600;">'+esc(u.lastName||u.name)+'</td>';
-      html+='<td><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--accent-dim);color:var(--accent);">'+roleLabel+'</span></td>';
+      var roleColor=u.role==='pending'?'var(--warning)':'var(--accent)';
+      var roleBg=u.role==='pending'?'rgba(234,179,8,0.15)':'var(--accent-dim)';
+      html+='<td><span style="font-size:10px;padding:2px 6px;border-radius:4px;background:'+roleBg+';color:'+roleColor+';">'+roleLabel+'</span>';
+      if(u.role==='pending') html+=' <button class="btn btn-primary" style="font-size:9px;padding:1px 6px;margin-left:4px;" onclick="approveUser(\''+esc(u.name)+'\')">Approve</button>';
+      html+='</td>';
+      html+='<td><input type="text" value="'+esc(u.email||'')+'" placeholder="email@army.mil" style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:3px 6px;font-size:10px;width:100%;outline:none;" onchange="updateUserEmail(\''+esc(u.name)+'\',this.value)"></td>';
       
       // Unit access checkboxes
       if(allUnits.length>0){
@@ -7147,6 +7187,356 @@ function renderAll(){
   try{updateUserDisplay();}catch(e){}
 }
 
+
+
+// ══ PARACHUTE REQUEST SYSTEM ══
+function renderRequests(){
+  var el=document.getElementById('requestsContent');
+  if(!el) return;
+  
+  if(!S.paraRequests) S.paraRequests=[];
+  
+  // Merge in shared requests from login page submissions
+  var sharedReqs=JSON.parse(localStorage.getItem('pms_shared_requests')||'[]');
+  sharedReqs.forEach(function(sr){
+    if(!S.paraRequests.find(function(r){return r.id===sr.id;})){
+      S.paraRequests.unshift(sr);
+    }
+  });
+  if(sharedReqs.length>0){localStorage.setItem('pms_shared_requests','[]');save();}
+  
+  var html='';
+  html+='<div style="display:flex;gap:8px;margin-bottom:16px;">';
+  html+='<button class="btn btn-primary" onclick="newParaRequest()">+ New Parachute Request</button>';
+  html+='</div>';
+  
+  // Pending requests
+  var pending=S.paraRequests.filter(function(r){return r.status==='pending';});
+  var approved=S.paraRequests.filter(function(r){return r.status==='approved';});
+  var disapproved=S.paraRequests.filter(function(r){return r.status==='disapproved';});
+  var negotiating=S.paraRequests.filter(function(r){return r.status==='negotiate';});
+  
+  if(pending.length>0){
+    html+='<div style="font-size:14px;font-weight:600;margin-bottom:8px;color:var(--warning);">Pending Requests ('+pending.length+')</div>';
+    pending.forEach(function(req,idx){renderRequestCard(req,idx,html);});
+    pending.forEach(function(req){
+      var ridx=S.paraRequests.indexOf(req);
+      html+=buildRequestCard(req,ridx);
+    });
+  }
+  if(negotiating.length>0){
+    html+='<div style="font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--accent);">Negotiating ('+negotiating.length+')</div>';
+    negotiating.forEach(function(req){
+      var ridx=S.paraRequests.indexOf(req);
+      html+=buildRequestCard(req,ridx);
+    });
+  }
+  if(approved.length>0){
+    html+='<div style="font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--success);">Approved ('+approved.length+')</div>';
+    approved.forEach(function(req){
+      var ridx=S.paraRequests.indexOf(req);
+      html+=buildRequestCard(req,ridx);
+    });
+  }
+  if(disapproved.length>0){
+    html+='<div style="font-size:14px;font-weight:600;margin:16px 0 8px;color:var(--danger);">Disapproved ('+disapproved.length+')</div>';
+    disapproved.forEach(function(req){
+      var ridx=S.paraRequests.indexOf(req);
+      html+=buildRequestCard(req,ridx);
+    });
+  }
+  
+  if(S.paraRequests.length===0){
+    html+='<div style="text-align:center;padding:40px;color:var(--text-muted);">No parachute requests yet. Click + New Parachute Request to create one.</div>';
+  }
+  
+  el.innerHTML=html;
+}
+
+function buildRequestCard(req,ridx){
+  var statusColors={pending:'var(--warning)',approved:'var(--success)',disapproved:'var(--danger)',negotiate:'var(--accent)'};
+  var sc=statusColors[req.status]||'var(--text-muted)';
+  var h='<div class="archive-item" style="cursor:pointer;" onclick="viewRequest('+ridx+')">';
+  h+='<div class="archive-item-info">';
+  h+='<div class="archive-item-title">'+esc(req.unitRequesting||'Unknown Unit')+' <span style="color:'+sc+';font-size:11px;font-weight:600;">'+req.status.toUpperCase()+'</span></div>';
+  h+='<div class="archive-item-meta">'+esc(req.pocName||'')+' | '+(req.opFrom||'?')+' | '+req.paraType+' x'+req.paraQty+'</div>';
+  h+='</div>';
+  if(hasRole('admin')){
+    h+='<div class="archive-item-actions" style="display:flex;gap:4px;" onclick="event.stopPropagation()">';
+    if(req.status==='pending'||req.status==='negotiate'){
+      h+='<button class="btn btn-primary" style="font-size:10px;padding:2px 8px;" onclick="updateRequestStatus('+ridx+',\'approved\')">Approve</button>';
+      h+='<button class="btn btn-danger" style="font-size:10px;padding:2px 8px;" onclick="updateRequestStatus('+ridx+',\'disapproved\')">Deny</button>';
+      h+='<button class="btn btn-secondary" style="font-size:10px;padding:2px 8px;" onclick="negotiateRequest('+ridx+')">Negotiate</button>';
+    }
+    h+='<button class="btn btn-secondary" style="font-size:10px;padding:2px 8px;color:var(--danger);" onclick="deleteRequest('+ridx+')">Del</button>';
+    h+='</div>';
+  }
+  h+='</div>';
+  return h;
+}
+
+function newParaRequest(){
+  var units=['197th STSC','294th','636th IEW BN','Other'];
+  var aircraft=['C130J','C130H','C17','CH47','UH60','Other'];
+  var paraTypes=['T-11 Main','MC6 Main','MC6 Reserve','T-11R Reserve','RA-1','Other'];
+  var vehicles=['Box Truck','LMTV','FMTV','5-Ton','Trailer','POV','Other'];
+  var airdrops=['None','CDS','Heavy Drop','Door Bundle','Other'];
+  var slingloads=['None','Internal','External','Both'];
+  var waterTypes=['None','5 Gallon','Buffalo','Other'];
+  var ammoTypes=['None','Ball','Blank','Other'];
+  var specialTraining=['None','MFF','HALO','HAHO','Static Line','Other'];
+  
+  function opts(arr,id){return arr.map(function(a){return '<option value="'+a+'">'+a+'</option>';}).join('');}
+  var is='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:6px 10px;font-size:12px;font-family:inherit;outline:none;width:100%;';
+  
+  var html='<div style="text-align:left;max-height:70vh;overflow-y:auto;padding-right:8px;">';
+  
+  // Requestor Info
+  html+='<div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:4px;">REQUESTOR INFO</div>';
+  html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Unit Requesting*</label><select id="rqUnit" style="'+is+'">'+opts(units)+'</select></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Other Unit</label><input id="rqUnitOther" style="'+is+'" placeholder="If other"></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">POC Name*</label><input id="rqPOCName" style="'+is+'" placeholder="LAST, FIRST"></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">POC Email*</label><input id="rqPOCEmail" style="'+is+'" placeholder="name@army.mil"></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">POC Phone*</label><input id="rqPOCPhone" style="'+is+'" placeholder="Phone #"></div>';
+  html+='</div>';
+  
+  // Operation Info
+  html+='<div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:4px;">OPERATION / TRAINING INFO</div>';
+  html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">From (Date/Time)*</label><input id="rqOpFrom" type="datetime-local" style="'+is+'"></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">To (Date)*</label><input id="rqOpTo" type="date" style="'+is+'"></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Departure Airfield*</label><input id="rqAirfield" style="'+is+'" placeholder="e.g. Kelly Airfield"></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">DZ/LZ/PZ*</label><input id="rqDZ" style="'+is+'" placeholder="e.g. Hall DZ"></div>';
+  html+='</div>';
+  
+  // Aircraft Info
+  html+='<div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:4px;">AIRCRAFT INFO</div>';
+  html+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;">';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Aircraft Type*</label><select id="rqAircraft" style="'+is+'">'+opts(aircraft)+'</select></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Quantity*</label><input id="rqAircraftQty" type="number" min="0" value="1" style="'+is+'"></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">In Trail?</label><select id="rqInTrail" style="'+is+'"><option value="No">No</option><option value="Yes">Yes</option></select></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">MALC (Donut)?</label><select id="rqMALC" style="'+is+'"><option value="No">No</option><option value="Yes">Yes</option></select></div>';
+  html+='<div style="grid-column:span 2;"><label style="font-size:10px;color:var(--text-muted);display:block;">Other Equipment</label><input id="rqOtherEquip" style="'+is+'" placeholder="Additional equipment needed"></div>';
+  html+='</div>';
+  
+  // Parachute Info
+  html+='<div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:4px;">PARACHUTE INFO</div>';
+  html+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;">';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Parachute Type*</label><select id="rqParaType" style="'+is+'">'+opts(paraTypes)+'</select></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Quantity*</label><input id="rqParaQty" type="number" min="0" value="0" style="'+is+'"></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Reserves*</label><input id="rqReserves" type="number" min="0" value="0" style="'+is+'"></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">AEBPs*</label><input id="rqAEBP" type="number" min="0" value="0" style="'+is+'"></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">MAWCs*</label><input id="rqMAWC" type="number" min="0" value="0" style="'+is+'"></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">MAWCLs*</label><input id="rqMAWCL" type="number" min="0" value="0" style="'+is+'"></div>';
+  html+='</div>';
+  
+  // Transport Info
+  html+='<div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:4px;">TRANSPORT INFO</div>';
+  html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Pick Up Date/Time*</label><input id="rqPickup" type="datetime-local" style="'+is+'"></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Return Date*</label><input id="rqReturn" type="date" style="'+is+'"></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Vehicle Type*</label><select id="rqVehicle" style="'+is+'">'+opts(vehicles)+'</select></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Other Vehicle</label><input id="rqVehicleOther" style="'+is+'" placeholder="If other"></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Pick Up POC Name*</label><input id="rqPickupPOC" style="'+is+'" placeholder="RANK LAST, FIRST"></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Pick Up POC Phone*</label><input id="rqPickupPhone" style="'+is+'" placeholder="Phone #"></div>';
+  html+='</div>';
+  
+  // Airdrop Info
+  html+='<div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:4px;">AIRDROP (if applicable)</div>';
+  html+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;">';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Airdrop Type</label><select id="rqAirdropType" style="'+is+'">'+opts(airdrops)+'</select></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Quantity</label><input id="rqAirdropQty" type="number" min="0" value="0" style="'+is+'"></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">MRE?</label><select id="rqMRE" style="'+is+'"><option value="No">No</option><option value="Yes">Yes</option></select></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Water Type</label><select id="rqWater" style="'+is+'">'+opts(waterTypes)+'</select></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Ammo Type</label><select id="rqAmmo" style="'+is+'">'+opts(ammoTypes)+'</select></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Notes</label><input id="rqAirdropNotes" style="'+is+'" placeholder="Airdrop notes"></div>';
+  html+='</div>';
+  
+  // Slingload Info
+  html+='<div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:4px;">SLINGLOAD (if applicable)</div>';
+  html+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;">';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Slingload Type</label><select id="rqSlingType" style="'+is+'">'+opts(slingloads)+'</select></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Quantity</label><input id="rqSlingQty" type="number" min="0" value="0" style="'+is+'"></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Equipment</label><input id="rqSlingEquip" style="'+is+'" placeholder="Equipment to be slung"></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Sling Aircraft</label><select id="rqSlingAircraft" style="'+is+'">'+opts(['None'].concat(aircraft))+'</select></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Sling Aircraft Qty</label><input id="rqSlingAircraftQty" type="number" min="0" value="0" style="'+is+'"></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Aircraft POC</label><input id="rqAircraftPOC" style="'+is+'" placeholder="POC Name"></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Aircraft POC Phone</label><input id="rqAircraftPOCPhone" style="'+is+'" placeholder="Phone #"></div>';
+  html+='</div>';
+  
+  // Special Training
+  html+='<div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:4px;">SPECIAL TRAINING</div>';
+  html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Special Training</label><select id="rqSpecialTraining" style="'+is+'">'+opts(specialTraining)+'</select></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Other</label><input id="rqSpecialOther" style="'+is+'" placeholder="If not listed"></div>';
+  html+='</div>';
+  
+  // Special Instructions
+  html+='<div style="margin-bottom:12px;"><label style="font-size:10px;color:var(--text-muted);display:block;">Special Instructions / Remarks</label><textarea id="rqRemarks" style="'+is+'height:60px;resize:vertical;" placeholder="Any special instructions..."></textarea></div>';
+  
+  html+='</div>';
+  
+  showConfirm('New Parachute Request', html,
+    [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
+     {label:'Submit Request',cls:'btn-primary',fn:function(){submitParaRequest();}}]);
+}
+
+function submitParaRequest(){
+  var unit=document.getElementById('rqUnit').value;
+  var pocName=document.getElementById('rqPOCName').value.trim();
+  var pocEmail=document.getElementById('rqPOCEmail').value.trim();
+  var pocPhone=document.getElementById('rqPOCPhone').value.trim();
+  var paraQty=document.getElementById('rqParaQty').value;
+  
+  if(!pocName){toast('Enter POC name','error');return;}
+  if(!pocEmail){toast('Enter POC email','error');return;}
+  if(!pocPhone){toast('Enter POC phone','error');return;}
+  if(!paraQty||paraQty==='0'){toast('Enter parachute quantity','error');return;}
+  
+  var req={
+    id:'req_'+Date.now(),
+    status:'pending',
+    submittedBy:currentUser?currentUser.name:'',
+    submittedAt:new Date().toISOString(),
+    unitRequesting:unit==='Other'?(document.getElementById('rqUnitOther').value.trim()||'Other'):unit,
+    pocName:pocName,
+    pocEmail:pocEmail,
+    pocPhone:pocPhone,
+    opFrom:document.getElementById('rqOpFrom').value,
+    opTo:document.getElementById('rqOpTo').value,
+    airfield:document.getElementById('rqAirfield').value.trim(),
+    dz:document.getElementById('rqDZ').value.trim(),
+    aircraftType:document.getElementById('rqAircraft').value,
+    aircraftQty:document.getElementById('rqAircraftQty').value,
+    inTrail:document.getElementById('rqInTrail').value,
+    malc:document.getElementById('rqMALC').value,
+    otherEquip:document.getElementById('rqOtherEquip').value.trim(),
+    paraType:document.getElementById('rqParaType').value,
+    paraQty:document.getElementById('rqParaQty').value,
+    reserves:document.getElementById('rqReserves').value,
+    aebp:document.getElementById('rqAEBP').value,
+    mawc:document.getElementById('rqMAWC').value,
+    mawcl:document.getElementById('rqMAWCL').value,
+    pickupDate:document.getElementById('rqPickup').value,
+    returnDate:document.getElementById('rqReturn').value,
+    vehicleType:document.getElementById('rqVehicle').value==='Other'?(document.getElementById('rqVehicleOther').value.trim()||'Other'):document.getElementById('rqVehicle').value,
+    pickupPOC:document.getElementById('rqPickupPOC').value.trim(),
+    pickupPhone:document.getElementById('rqPickupPhone').value.trim(),
+    airdropType:document.getElementById('rqAirdropType').value,
+    airdropQty:document.getElementById('rqAirdropQty').value,
+    mre:document.getElementById('rqMRE').value,
+    waterType:document.getElementById('rqWater').value,
+    ammoType:document.getElementById('rqAmmo').value,
+    airdropNotes:document.getElementById('rqAirdropNotes').value.trim(),
+    slingType:document.getElementById('rqSlingType').value,
+    slingQty:document.getElementById('rqSlingQty').value,
+    slingEquip:document.getElementById('rqSlingEquip').value.trim(),
+    slingAircraft:document.getElementById('rqSlingAircraft').value,
+    slingAircraftQty:document.getElementById('rqSlingAircraftQty').value,
+    aircraftPOC:document.getElementById('rqAircraftPOC').value.trim(),
+    aircraftPOCPhone:document.getElementById('rqAircraftPOCPhone').value.trim(),
+    specialTraining:document.getElementById('rqSpecialTraining').value==='Other'?(document.getElementById('rqSpecialOther').value.trim()||'Other'):document.getElementById('rqSpecialTraining').value,
+    remarks:document.getElementById('rqRemarks').value.trim(),
+    adminRemarks:''
+  };
+  
+  if(!S.paraRequests) S.paraRequests=[];
+  S.paraRequests.unshift(req);
+  
+  // Also save to a shared localStorage key so all units see it
+  var sharedReqs=JSON.parse(localStorage.getItem('pms_shared_requests')||'[]');
+  sharedReqs.unshift(req);
+  localStorage.setItem('pms_shared_requests',JSON.stringify(sharedReqs));
+  
+  if(currentUser) save();
+  auditLog('request','Request Submitted','Parachute request from '+req.unitRequesting+': '+req.paraQty+' '+req.paraType);
+  if(currentUser) renderRequests();
+  toast('Request submitted successfully','success',5000);
+}
+
+function viewRequest(ridx){
+  var req=S.paraRequests[ridx];
+  if(!req) return;
+  
+  var sc={pending:'var(--warning)',approved:'var(--success)',disapproved:'var(--danger)',negotiate:'var(--accent)'};
+  
+  var html='<div style="text-align:left;max-height:70vh;overflow-y:auto;font-size:12px;line-height:1.6;">';
+  html+='<div style="font-size:16px;font-weight:700;margin-bottom:4px;color:'+sc[req.status]+';">'+req.status.toUpperCase()+'</div>';
+  if(req.adminRemarks) html+='<div style="padding:6px 10px;background:var(--bg-card);border:1px solid var(--border);border-radius:4px;margin-bottom:12px;font-style:italic;">'+esc(req.adminRemarks)+'</div>';
+  
+  var fields=[
+    ['Unit',req.unitRequesting],['POC',req.pocName],['Email',req.pocEmail],['Phone',req.pocPhone],
+    ['Op From',req.opFrom],['Op To',req.opTo],['Airfield',req.airfield],['DZ/LZ/PZ',req.dz],
+    ['Aircraft',req.aircraftType+' x'+req.aircraftQty],['In Trail',req.inTrail],['MALC',req.malc],
+    ['Other Equipment',req.otherEquip],
+    ['Parachute Type',req.paraType],['Quantity',req.paraQty],['Reserves',req.reserves],
+    ['AEBPs',req.aebp],['MAWCs',req.mawc],['MAWCLs',req.mawcl],
+    ['Pick Up',req.pickupDate],['Return',req.returnDate],['Vehicle',req.vehicleType],
+    ['Pick Up POC',req.pickupPOC+' / '+req.pickupPhone],
+    ['Airdrop',req.airdropType+(req.airdropQty>0?' x'+req.airdropQty:'')],
+    ['Slingload',req.slingType+(req.slingQty>0?' x'+req.slingQty:'')],
+    ['Special Training',req.specialTraining],['Remarks',req.remarks]
+  ];
+  
+  html+='<table style="width:100%;border-collapse:collapse;">';
+  fields.forEach(function(f){
+    if(!f[1]||f[1]==='None'||f[1]==='0'||f[1]==='None x0') return;
+    html+='<tr><td style="padding:3px 8px;color:var(--text-muted);width:130px;vertical-align:top;">'+f[0]+'</td><td style="padding:3px 8px;font-weight:500;">'+esc(f[1]||'')+'</td></tr>';
+  });
+  html+='</table>';
+  html+='<div style="font-size:10px;color:var(--text-muted);margin-top:8px;">Submitted: '+new Date(req.submittedAt).toLocaleString()+' by '+esc(req.submittedBy||'')+'</div>';
+  html+='</div>';
+  
+  var buttons=[{label:'Close',cls:'btn-secondary',fn:function(){}}];
+  if(hasRole('admin')&&(req.status==='pending'||req.status==='negotiate')){
+    buttons.push({label:'Approve',cls:'btn-primary',fn:function(){updateRequestStatus(ridx,'approved');}});
+    buttons.push({label:'Deny',cls:'btn-danger',fn:function(){updateRequestStatus(ridx,'disapproved');}});
+    buttons.push({label:'Negotiate',cls:'btn-secondary',fn:function(){negotiateRequest(ridx);}});
+  }
+  
+  showConfirm('Request: '+esc(req.unitRequesting), html, buttons);
+}
+
+function updateRequestStatus(ridx,status){
+  var req=S.paraRequests[ridx];
+  if(!req) return;
+  req.status=status;
+  req.reviewedBy=currentUser?currentUser.name:'';
+  req.reviewedAt=new Date().toISOString();
+  save();
+  auditLog('request','Request '+status,'Request from '+req.unitRequesting+' '+status+' by '+(currentUser?currentUser.name:''));
+  renderRequests();
+  toast('Request '+status,'success');
+}
+
+function negotiateRequest(ridx){
+  var req=S.paraRequests[ridx];
+  if(!req) return;
+  showConfirm('Negotiate Request','<div style="text-align:left;"><label style="font-size:11px;color:var(--text-muted);display:block;">Remarks / Counter-proposal:</label><textarea id="negRemarks" style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:8px;font-size:12px;font-family:inherit;outline:none;width:100%;height:80px;resize:vertical;" placeholder="Enter remarks...">'+esc(req.adminRemarks||'')+'</textarea></div>',
+    [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
+     {label:'Send',cls:'btn-primary',fn:function(){
+       req.status='negotiate';
+       req.adminRemarks=document.getElementById('negRemarks').value.trim();
+       req.reviewedBy=currentUser?currentUser.name:'';
+       req.reviewedAt=new Date().toISOString();
+       save();
+       auditLog('request','Request Negotiate','Negotiating with '+req.unitRequesting);
+       renderRequests();
+       toast('Negotiate response sent','success');
+     }}]);
+}
+
+function deleteRequest(ridx){
+  showConfirm('Delete Request','Delete this parachute request?',
+    [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
+     {label:'Delete',cls:'btn-danger',fn:function(){
+       S.paraRequests.splice(ridx,1);
+       save();
+       renderRequests();
+       toast('Request deleted','warning');
+     }}]);
+}
 
 // ══ HELP / USER GUIDE ══
 function showHelp(){
