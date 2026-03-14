@@ -7384,11 +7384,17 @@ function newParaRequest(){
 }
 
 function submitParaRequest(){
-  var unit=document.getElementById('rqUnit').value;
-  var pocName=document.getElementById('rqPOCName').value.trim();
-  var pocEmail=document.getElementById('rqPOCEmail').value.trim();
-  var pocPhone=document.getElementById('rqPOCPhone').value.trim();
-  var paraQty=document.getElementById('rqParaQty').value;
+  try{
+  var unit=document.getElementById('rqUnit');
+  if(!unit){alert('Form not found - rqUnit missing');return;}
+  unit=unit.value;
+  var pocName=(document.getElementById('rqPOCName')||{}).value||'';
+  pocName=pocName.trim();
+  var pocEmail=(document.getElementById('rqPOCEmail')||{}).value||'';
+  pocEmail=pocEmail.trim();
+  var pocPhone=(document.getElementById('rqPOCPhone')||{}).value||'';
+  pocPhone=pocPhone.trim();
+  var paraQty=(document.getElementById('rqParaQty')||{}).value||'0';
   
   if(!pocName){toast('Enter POC name','error');return;}
   if(!pocEmail){toast('Enter POC email','error');return;}
@@ -7455,6 +7461,7 @@ function submitParaRequest(){
   }
   
   toast('Request submitted successfully! An admin will review it.','success',5000);
+  }catch(e){alert('Submit error: '+e.message);}
 }
 
 function viewRequest(ridx){
