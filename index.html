@@ -2113,12 +2113,12 @@ function exportAuditLog(){
 function approveUser(userName){
   var users=getUsers();
   var user=users.find(function(u){return u.name===userName;});
-  if(!user) return;
+  if(!user){toast('User not found','error');return;}
   user.role='rigger';
   saveUsers(users);
-  if(sbClient) saveUsersDB();
   auditLog('config','User Approved','Approved user: '+userName);
   renderAdmin();
+  populateLoginDropdown();
   toast(userName+' approved as rigger','success');
 }
 
@@ -7506,7 +7506,8 @@ function updateRequestStatus(ridx,status){
   req.reviewedAt=new Date().toISOString();
   save();
   auditLog('request','Request '+status,'Request from '+req.unitRequesting+' '+status+' by '+(currentUser?currentUser.name:''));
-  renderRequests();
+  try{renderRequests();}catch(e){}
+  try{renderHome();}catch(e){}
   toast('Request '+status,'success');
 }
 
