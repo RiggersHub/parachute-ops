@@ -438,7 +438,6 @@
       <button class="nav-tab" data-page="weekly">Weekly Data Report</button>
       <button class="nav-tab" data-page="archive">Archived Records</button>
       <button class="nav-tab" data-page="ops">Issue &amp; Return</button>
-      <button class="nav-tab" data-page="requests">Requests</button>
       <button class="nav-tab" data-page="inventory">Inventory</button>
       <button class="nav-tab" data-page="csvupload">Upload Files</button>
       <button class="nav-tab" data-page="admin">Admin</button>
@@ -1387,6 +1386,7 @@ async function loadFromDB() {
       if(extra.monthlySnapshots) S.monthlySnapshots=extra.monthlySnapshots;
       if(extra.archive) S.archive=extra.archive;
       if(extra.abnOps) S.abnOps=extra.abnOps;
+      if(extra.paraRequests) S.paraRequests=extra.paraRequests;
       if(extra.capacityT11) S.capacityT11=extra.capacityT11;
       if(extra.capacityMC6) S.capacityMC6=extra.capacityMC6;
       if(extra.capacityRA1) S.capacityRA1=extra.capacityRA1;
@@ -1558,6 +1558,7 @@ async function saveToDB() {
       monthlySnapshots: S.monthlySnapshots || [],
       archive: S.archive || {deletedSections:[],deletedRows:[]},
       abnOps: S.abnOps || [],
+      paraRequests: S.paraRequests || [],
       capacityT11: S.capacityT11 || 0,
       capacityMC6: S.capacityMC6 || 0,
       capacityRA1: S.capacityRA1 || 0
@@ -7441,18 +7442,19 @@ function submitParaRequest(){
     adminRemarks:''
   };
   
-  if(!S.paraRequests) S.paraRequests=[];
-  S.paraRequests.unshift(req);
-  
-  // Also save to a shared localStorage key so all units see it
+  // Save to shared requests (accessible from any unit/login page)
   var sharedReqs=JSON.parse(localStorage.getItem('pms_shared_requests')||'[]');
   sharedReqs.unshift(req);
   localStorage.setItem('pms_shared_requests',JSON.stringify(sharedReqs));
   
-  if(currentUser) save();
-  auditLog('request','Request Submitted','Parachute request from '+req.unitRequesting+': '+req.paraQty+' '+req.paraType);
-  if(currentUser) renderRequests();
-  toast('Request submitted successfully','success',5000);
+  // Also save to current unit if logged in
+  if(currentUser){
+    if(!S.paraRequests) S.paraRequests=[];
+    S.paraRequests.unshift(req);
+    save();
+  }
+  
+  toast('Request submitted successfully! An admin will review it.','success',5000);
 }
 
 function viewRequest(ridx){
