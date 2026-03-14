@@ -813,7 +813,11 @@ function parseAnyDate(str){
   // Mon YYYY or Month YYYY (e.g. Mar 2005, March 2005, DEC 2003)
   const monthNames={jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11,
     january:0,february:1,march:2,april:3,june:5,july:6,august:7,september:8,october:9,november:10,december:11};
-  const m5=str.match(/^([a-zA-Z]+)\s*(\d{4})$/);
+  // Mon-YY or Mon YY (e.g. May-12, Jan-14, Sep-16)
+  const m5a=str.match(/^([a-zA-Z]+)[\s\-](\d{2})$/);
+  if(m5a&&monthNames[m5a[1].toLowerCase()]!==undefined){ const yr=parseInt(m5a[2]); const full=yr>50?1900+yr:2000+yr; return new Date(full,monthNames[m5a[1].toLowerCase()],1); }
+  // Mon-YYYY or Mon YYYY (e.g. Mar 2005, March 2005, DEC 2003)
+  const m5=str.match(/^([a-zA-Z]+)[\s\-](\d{4})$/);
   if(m5&&monthNames[m5[1].toLowerCase()]!==undefined) return new Date(parseInt(m5[2]),monthNames[m5[1].toLowerCase()],1);
   // YYYY (just a year)
   if(/^\d{4}$/.test(str)) return new Date(parseInt(str),0,1);
@@ -5671,6 +5675,34 @@ function csvDoImport(){
   }
 
   toast('✅ '+allRows.length+' rows saved to '+sys,'success');
+  
+  // Also add to master inventory
+  var snIdx=mapKeys.indexOf('serialNumber');
+  var domIdx=mapKeys.indexOf('dom');
+  var pisIdx=mapKeys.indexOf('pis');
+  if(snIdx>=0){
+    var added=0;
+    allRows.forEach(function(row){
+      var sn=row[snIdx]?row[snIdx].trim():'';
+      if(!sn) return;
+      var dom=domIdx>=0?(row[domIdx]||'').trim():'';
+      var pis=pisIdx>=0?(row[pisIdx]||'').trim():'';
+      var osd=calcOSDString(dom,pis);
+      if(!S.masterInventory) S.masterInventory={};
+      if(!S.masterInventory[sn]){
+        S.masterInventory[sn]={dom:dom,pis:pis,osd:osd};
+        added++;
+      } else {
+        // Update existing if blank
+        if(!S.masterInventory[sn].dom&&dom) S.masterInventory[sn].dom=dom;
+        if(!S.masterInventory[sn].pis&&pis) S.masterInventory[sn].pis=pis;
+        S.masterInventory[sn].osd=calcOSDString(S.masterInventory[sn].dom,S.masterInventory[sn].pis);
+      }
+    });
+    save();
+    if(added>0) toast(added+' chutes added to master inventory','info',3000);
+  }
+  
   csvReset();
 }
 
