@@ -6967,9 +6967,9 @@ function renderInventory(){
     html+='<tr>';
     html+='<td><input type="checkbox" class="inv-cb" data-sn="'+esc(sn)+'"></td>';
     html+='<td style="font-weight:600;cursor:pointer;color:var(--accent);" onclick="showChuteHistory(\''+esc(sn)+'\')" title="Click for history">'+esc(sn)+'</td>';
-    html+='<td>'+(item.dom||'\u2014')+'</td>';
-    html+='<td>'+(item.pis||'\u2014')+'</td>';
-    html+='<td>'+(item.osd||'\u2014')+'</td>';
+    html+='<td><input type="text" value="'+esc(item.dom||'')+'" style="background:var(--bg-input);border:1px solid var(--border);border-radius:3px;color:var(--text-primary);padding:2px 5px;font-size:11px;width:65px;outline:none;" onchange="updateInventoryField(\''+esc(sn)+'\',\'dom\',this.value)"></td>';
+    html+='<td><input type="text" value="'+esc(item.pis||'')+'" style="background:var(--bg-input);border:1px solid var(--border);border-radius:3px;color:var(--text-primary);padding:2px 5px;font-size:11px;width:65px;outline:none;" onchange="updateInventoryField(\''+esc(sn)+'\',\'pis\',this.value)"></td>';
+    html+='<td style="font-size:11px;">'+(item.osd||'\u2014')+'</td>';
     html+='<td style="font-size:11px;color:var(--text-muted);">'+location+'</td>';
     html+='<td><button class="row-action-btn delete" onclick="deleteInventoryItem(\''+esc(sn)+'\')">\u2715</button></td>';
     html+='</tr>';
@@ -6993,6 +6993,23 @@ function showAddInventory(){
        toast('Added '+sn,'success');
      }}]);
 }
+function updateInventoryField(sn,fld,val){
+  if(!S.masterInventory||!S.masterInventory[sn]) return;
+  S.masterInventory[sn][fld]=val.trim();
+  S.masterInventory[sn].osd=calcOSDString(S.masterInventory[sn].dom,S.masterInventory[sn].pis);
+  // Also update in any RPR section rows
+  S.sections.forEach(function(sec){
+    sec.rows.forEach(function(r){
+      if(r.serialNumber===sn){
+        if(fld==='dom') r.dom=val.trim();
+        if(fld==='pis') r.pis=val.trim();
+        r.osd=calcOSDString(r.dom,r.pis);
+      }
+    });
+  });
+  save();
+}
+
 function deleteInventoryItem(sn){
   showConfirm('Remove from Inventory','Remove <strong>'+esc(sn)+'</strong>?',
     [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
@@ -7924,7 +7941,10 @@ function startAutoSync(){
       var success=await loadFromDB();
       if(success){
         try{localStorage.setItem(getStorageKey(),JSON.stringify(S));}catch(e){}
-        renderAll();
+        // Don't re-render - just update data silently
+        // Only re-render if user is on Home page (for request updates)
+        var activeTab=document.querySelector('.nav-tab.active');
+        if(activeTab&&activeTab.dataset.page==='home') try{renderHome();}catch(e){}
       }
     }catch(e){}
   },30000);
