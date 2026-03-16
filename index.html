@@ -554,6 +554,15 @@
       <button class="btn btn-primary btn-sm" onclick="showAddInventory()">+ Add Serial</button>
       <button class="btn btn-secondary btn-sm" onclick="generateBarcodes()">Print All Barcodes</button>
       <button class="btn btn-secondary btn-sm" onclick="generateBarcodeSheet('selected')">Print Selected</button>
+      <select id="bulkSysType" class="form-input" style="font-size:11px;padding:4px 8px;width:auto;">
+        <option value="">Bulk Set System</option>
+        <option value="T-11">T-11</option>
+        <option value="MC-6">MC-6</option>
+        <option value="RA-1">RA-1</option>
+        <option value="RA-1R">RA-1R</option>
+      </select>
+      <button class="btn btn-secondary btn-sm" onclick="bulkSetSystemType()">Apply to Selected</button>
+      <button class="btn btn-secondary btn-sm" onclick="selectAllInventory()">Select All</button>
     </div>
   </div>
   <div style="padding:0 24px 8px;">
@@ -1775,6 +1784,19 @@ function doLogin(){
   sessionStorage.setItem('pms_session',JSON.stringify(currentUser));
   document.getElementById('loginOverlay').style.display='none';
   updateUserDisplay();
+  // Merge any shared requests submitted from login page
+  var sharedReqs=JSON.parse(localStorage.getItem('pms_shared_requests')||'[]');
+  if(sharedReqs.length>0){
+    if(!S.paraRequests) S.paraRequests=[];
+    sharedReqs.forEach(function(sr){
+      if(!S.paraRequests.find(function(r){return r.id===sr.id;})){
+        S.paraRequests.unshift(sr);
+      }
+    });
+    localStorage.setItem('pms_shared_requests','[]');
+    save();
+  }
+  renderHome();
   auditLog('config','Login','User logged in: '+(user.lastName||user.name)+' ('+(user.role==='masteradmin'?'admin':user.role)+')');
 }
 
@@ -7011,6 +7033,30 @@ function updateInventoryField(sn,fld,val){
     });
   });
   save();
+}
+
+function selectAllInventory(){
+  var cbs=document.querySelectorAll('.inv-cb');
+  var allChecked=Array.from(cbs).every(function(cb){return cb.checked;});
+  cbs.forEach(function(cb){cb.checked=!allChecked;});
+}
+
+function bulkSetSystemType(){
+  var sysType=document.getElementById('bulkSysType').value;
+  if(!sysType){toast('Select a system type first','error');return;}
+  var cbs=document.querySelectorAll('.inv-cb:checked');
+  if(cbs.length===0){toast('Select chutes first','error');return;}
+  var count=0;
+  cbs.forEach(function(cb){
+    var sn=cb.dataset.sn;
+    if(sn&&S.masterInventory[sn]){
+      S.masterInventory[sn].systemType=sysType;
+      count++;
+    }
+  });
+  save();
+  renderInventory();
+  toast(count+' chutes set to '+sysType,'success');
 }
 
 function deleteInventoryItem(sn){
