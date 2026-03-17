@@ -396,7 +396,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.16.4</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.16.5</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -6217,9 +6217,58 @@ function opsScanPack(){
 }
 
 // ═══ MODE 2: SIGN OUT ═══
+
+function fillFromRequest(ridx){
+  var req=S.paraRequests[ridx];
+  if(!req) return;
+  // Fill the ops form cache with request data
+  opsFormCache={
+    unit:req.unitRequesting||'',
+    date:req.opFrom?req.opFrom.split('T')[0]:'',
+    systems:[]
+  };
+  // Add each chute type from paraLines
+  if(req.paraLines&&req.paraLines.length>0){
+    req.paraLines.forEach(function(pl){
+      // Map request type names to system types
+      var sys=pl.type;
+      if(sys.includes('T-11')) sys='T-11';
+      else if(sys.includes('MC6')||sys.includes('MC-6')) sys='MC-6';
+      else if(sys.includes('RA-1R')) sys='RA-1R';
+      else if(sys.includes('RA-1')) sys='RA-1';
+      opsFormCache.systems.push({system:sys,qty:parseInt(pl.qty)||0});
+    });
+  } else if(req.paraType&&req.paraQty){
+    var sys=req.paraType;
+    if(sys.includes('T-11')) sys='T-11';
+    else if(sys.includes('MC6')||sys.includes('MC-6')) sys='MC-6';
+    else if(sys.includes('RA-1R')) sys='RA-1R';
+    else if(sys.includes('RA-1')) sys='RA-1';
+    opsFormCache.systems.push({system:sys,qty:parseInt(req.paraQty)||0});
+  }
+  renderOps();
+  toast('Filled from '+req.unitRequesting+' request','success',2000);
+}
+
 function renderOpsSignOut(el){
   var fc=opsFormCache;
   var html='<div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:20px;">';
+  
+  // Show approved requests as quick-fill options
+  var approved=(S.paraRequests||[]).filter(function(r){return r.status==='approved';});
+  if(approved.length>0){
+    html+='<div style="margin-bottom:16px;padding:10px;background:var(--bg-card);border:1px solid var(--success);border-radius:8px;">';
+    html+='<div style="font-size:12px;font-weight:600;color:var(--success);margin-bottom:6px;">Approved Requests</div>';
+    approved.forEach(function(req,ai){
+      var ridx=S.paraRequests.indexOf(req);
+      html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;margin-bottom:4px;background:var(--bg-input);border-radius:4px;font-size:11px;">';
+      html+='<span><strong>'+esc(req.unitRequesting)+'</strong> | '+esc(req.paraType||'')+' | '+(req.opFrom||'?')+'</span>';
+      html+='<button class="btn btn-primary" style="font-size:10px;padding:2px 10px;" onclick="fillFromRequest('+ridx+')">Use</button>';
+      html+='</div>';
+    });
+    html+='</div>';
+  }
+  
   html+='<h3 style="font-size:15px;margin-bottom:12px;">Issue Mode</h3>';
   html+='<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">Select unit, date, and add system types with quantities.</div>';
   
