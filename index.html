@@ -396,7 +396,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.17.1</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.17.2</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -7506,7 +7506,7 @@ function buildRequestCard(req,ridx){
 function newParaRequest(){
   var units=['294th','143rd','19th Group','Other'];
   var aircraft=['C130J','C130H','C17','CH47','UH60','Other'];
-  var paraTypes=['T-11 Main','MC6 Main','MC6 Reserve','T-11R Reserve','RA-1','Other'];
+  var paraTypes=['T-11 Main','MC-6 Main','T-11R Reserve','RA-1','RA-1R','Other'];
   var vehicles=['Box Truck','LMTV','FMTV','5-Ton','Trailer','POV','Other'];
   var airdrops=['None','CDS','Heavy Drop','Door Bundle','Other'];
   var slingloads=['None','Internal','External','Both'];
@@ -7636,7 +7636,53 @@ function newParaRequest(){
     if(!pp){toast('Enter POC phone','error');return;}
     if(paraSum.length===0){toast('Add chute type with quantity','error');return;}
     
-    // Close form, show styled confirm
+    // Cache form data before closing
+    window._pendingRequest = {
+      unit: unitVal==='Other'?((document.getElementById('rqUnitOther')||{}).value||'Other'):unitVal,
+      pocName: pn, pocEmail: pe, pocPhone: pp,
+      opFrom: opFrom,
+      opTo: ((document.getElementById('rqOpTo')||{}).value||''),
+      airfield: airfield, dz: dz,
+      aircraftType: ((document.getElementById('rqAircraft')||{}).value||''),
+      aircraftQty: ((document.getElementById('rqAircraftQty')||{}).value||''),
+      inTrail: ((document.getElementById('rqInTrail')||{}).value||''),
+      malc: ((document.getElementById('rqMALC')||{}).value||''),
+      otherEquip: ((document.getElementById('rqOtherEquip')||{}).value||'').trim(),
+      paraLines: [],
+      reserves: ((document.getElementById('rqReserves')||{}).value||''),
+      aebp: ((document.getElementById('rqAEBP')||{}).value||''),
+      mawc: ((document.getElementById('rqMAWC')||{}).value||''),
+      mawcl: ((document.getElementById('rqMAWCL')||{}).value||''),
+      pickupDate: ((document.getElementById('rqPickup')||{}).value||''),
+      returnDate: returnDt,
+      vehicleType: ((document.getElementById('rqVehicle')||{}).value||''),
+      pickupPOC: pickupPOC, pickupPhone: pickupPhone,
+      airdropType: ((document.getElementById('rqAirdropType')||{}).value||''),
+      airdropQty: ((document.getElementById('rqAirdropQty')||{}).value||''),
+      mre: ((document.getElementById('rqMRE')||{}).value||''),
+      waterType: ((document.getElementById('rqWater')||{}).value||''),
+      ammoType: ((document.getElementById('rqAmmo')||{}).value||''),
+      airdropNotes: ((document.getElementById('rqAirdropNotes')||{}).value||'').trim(),
+      slingType: ((document.getElementById('rqSlingType')||{}).value||''),
+      slingQty: ((document.getElementById('rqSlingQty')||{}).value||''),
+      slingEquip: ((document.getElementById('rqSlingEquip')||{}).value||'').trim(),
+      slingAircraft: ((document.getElementById('rqSlingAircraft')||{}).value||''),
+      slingAircraftQty: ((document.getElementById('rqSlingAircraftQty')||{}).value||''),
+      aircraftPOC: ((document.getElementById('rqAircraftPOC')||{}).value||'').trim(),
+      aircraftPOCPhone: ((document.getElementById('rqAircraftPOCPhone')||{}).value||'').trim(),
+      specialTraining: ((document.getElementById('rqSpecialTraining')||{}).value||''),
+      remarks: ((document.getElementById('rqRemarks')||{}).value||'').trim()
+    };
+    lines.forEach(function(el){
+      var t=el.querySelector('.rqParaType');
+      var q=el.querySelector('.rqParaQty');
+      if(t&&q&&q.value) window._pendingRequest.paraLines.push({type:t.value,qty:q.value});
+    });
+    var pl=window._pendingRequest.paraLines;
+    window._pendingRequest.paraType=pl.map(function(p){return p.type+' x'+p.qty;}).join(', ');
+    window._pendingRequest.paraQty=String(pl.reduce(function(s,p){return s+parseInt(p.qty||0);},0));
+    
+    // Close form
     overlay.remove();
     
     var summary='<div style="text-align:left;font-size:13px;line-height:2;">';
@@ -7663,7 +7709,7 @@ function newParaRequest(){
 function addParaLine(){
   var container=document.getElementById('paraRequestLines');
   if(!container) return;
-  var paraTypes=['T-11 Main','MC6 Main','MC6 Reserve','T-11R Reserve','RA-1','Other'];
+  var paraTypes=['T-11 Main','MC-6 Main','T-11R Reserve','RA-1','RA-1R','Other'];
   var is='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:6px 10px;font-size:12px;font-family:inherit;outline:none;width:100%;';
   var div=document.createElement('div');
   div.className='para-req-line';
@@ -7675,81 +7721,58 @@ function addParaLine(){
 
 function submitParaRequest(){
   try{
-  var unit=document.getElementById('rqUnit');
-  if(!unit){alert('rqUnit missing');return;}
-  unit=unit.value;
-  var pocName=(document.getElementById('rqPOCName')||{}).value||'';
-  pocName=pocName.trim();
-  var pocEmail=(document.getElementById('rqPOCEmail')||{}).value||'';
-  pocEmail=pocEmail.trim();
-  var pocPhone=(document.getElementById('rqPOCPhone')||{}).value||'';
-  pocPhone=pocPhone.trim();
-  var paraQty='0'; // collected from multi-line
-  
-  if(!pocName){toast('Enter POC name','error');return;}
-  if(!pocEmail){toast('Enter POC email','error');return;}
-  if(!pocPhone){toast('Enter POC phone','error');return;}
-  
-  // Collect multi-line chute types
-  var paraLines=[];
-  document.querySelectorAll('.para-req-line').forEach(function(el){
-    var t=el.querySelector('.rqParaType');
-    var q=el.querySelector('.rqParaQty');
-    if(t&&q&&q.value) paraLines.push({type:t.value,qty:q.value});
-  });
-  if(paraLines.length===0){toast('Add at least one chute type with quantity','error');return;}
-  var paraSummary=paraLines.map(function(p){return p.type+' x'+p.qty;}).join(', ');
-  var totalParaQty=paraLines.reduce(function(s,p){return s+parseInt(p.qty||0);},0);
+  var d = window._pendingRequest;
+  if(!d){toast('No request data','error');return;}
   
   var req={
     id:'req_'+Date.now(),
     status:'pending',
     submittedBy:currentUser?currentUser.name:'',
     submittedAt:new Date().toISOString(),
-    unitRequesting:unit==='Other'?(((document.getElementById('rqUnitOther')||{}).value||'').trim()||'Other'):unit,
-    pocName:pocName,
-    pocEmail:pocEmail,
-    pocPhone:pocPhone,
-    opFrom:(document.getElementById('rqOpFrom')||{}).value||'',
-    opTo:(document.getElementById('rqOpTo')||{}).value||'',
-    airfield:((document.getElementById('rqAirfield')||{}).value||'').trim(),
-    dz:((document.getElementById('rqDZ')||{}).value||'').trim(),
-    aircraftType:(document.getElementById('rqAircraft')||{}).value||'',
-    aircraftQty:(document.getElementById('rqAircraftQty')||{}).value||'',
-    inTrail:(document.getElementById('rqInTrail')||{}).value||'',
-    malc:(document.getElementById('rqMALC')||{}).value||'',
-    otherEquip:((document.getElementById('rqOtherEquip')||{}).value||'').trim(),
-    paraLines:paraLines,
-    paraType:paraSummary,
-    paraQty:String(totalParaQty),
-    reserves:(document.getElementById('rqReserves')||{}).value||'',
-    aebp:(document.getElementById('rqAEBP')||{}).value||'',
-    mawc:(document.getElementById('rqMAWC')||{}).value||'',
-    mawcl:(document.getElementById('rqMAWCL')||{}).value||'',
-    pickupDate:(document.getElementById('rqPickup')||{}).value||'',
-    returnDate:(document.getElementById('rqReturn')||{}).value||'',
-    vehicleType:(document.getElementById('rqVehicle')||{}).value||''==='Other'?(((document.getElementById('rqVehicleOther')||{}).value||'').trim()||'Other'):(document.getElementById('rqVehicle')||{}).value||'',
-    pickupPOC:((document.getElementById('rqPickupPOC')||{}).value||'').trim(),
-    pickupPhone:((document.getElementById('rqPickupPhone')||{}).value||'').trim(),
-    airdropType:(document.getElementById('rqAirdropType')||{}).value||'',
-    airdropQty:(document.getElementById('rqAirdropQty')||{}).value||'',
-    mre:(document.getElementById('rqMRE')||{}).value||'',
-    waterType:(document.getElementById('rqWater')||{}).value||'',
-    ammoType:(document.getElementById('rqAmmo')||{}).value||'',
-    airdropNotes:((document.getElementById('rqAirdropNotes')||{}).value||'').trim(),
-    slingType:(document.getElementById('rqSlingType')||{}).value||'',
-    slingQty:(document.getElementById('rqSlingQty')||{}).value||'',
-    slingEquip:((document.getElementById('rqSlingEquip')||{}).value||'').trim(),
-    slingAircraft:(document.getElementById('rqSlingAircraft')||{}).value||'',
-    slingAircraftQty:(document.getElementById('rqSlingAircraftQty')||{}).value||'',
-    aircraftPOC:((document.getElementById('rqAircraftPOC')||{}).value||'').trim(),
-    aircraftPOCPhone:((document.getElementById('rqAircraftPOCPhone')||{}).value||'').trim(),
-    specialTraining:(document.getElementById('rqSpecialTraining')||{}).value||''==='Other'?(((document.getElementById('rqSpecialOther')||{}).value||'').trim()||'Other'):(document.getElementById('rqSpecialTraining')||{}).value||'',
-    remarks:((document.getElementById('rqRemarks')||{}).value||'').trim(),
+    unitRequesting:d.unit,
+    pocName:d.pocName,
+    pocEmail:d.pocEmail,
+    pocPhone:d.pocPhone,
+    opFrom:d.opFrom,
+    opTo:d.opTo,
+    airfield:d.airfield,
+    dz:d.dz,
+    aircraftType:d.aircraftType,
+    aircraftQty:d.aircraftQty,
+    inTrail:d.inTrail,
+    malc:d.malc,
+    otherEquip:d.otherEquip,
+    paraLines:d.paraLines,
+    paraType:d.paraType,
+    paraQty:d.paraQty,
+    reserves:d.reserves,
+    aebp:d.aebp,
+    mawc:d.mawc,
+    mawcl:d.mawcl,
+    pickupDate:d.pickupDate,
+    returnDate:d.returnDate,
+    vehicleType:d.vehicleType,
+    pickupPOC:d.pickupPOC,
+    pickupPhone:d.pickupPhone,
+    airdropType:d.airdropType,
+    airdropQty:d.airdropQty,
+    mre:d.mre,
+    waterType:d.waterType,
+    ammoType:d.ammoType,
+    airdropNotes:d.airdropNotes,
+    slingType:d.slingType,
+    slingQty:d.slingQty,
+    slingEquip:d.slingEquip,
+    slingAircraft:d.slingAircraft,
+    slingAircraftQty:d.slingAircraftQty,
+    aircraftPOC:d.aircraftPOC,
+    aircraftPOCPhone:d.aircraftPOCPhone,
+    specialTraining:d.specialTraining,
+    remarks:d.remarks,
     adminRemarks:''
   };
   
-  // Save request directly
+  // Save request
   var sharedReqs=JSON.parse(localStorage.getItem('pms_shared_requests')||'[]');
   sharedReqs.unshift(req);
   localStorage.setItem('pms_shared_requests',JSON.stringify(sharedReqs));
@@ -7759,6 +7782,7 @@ function submitParaRequest(){
     save();
     try{renderHome();}catch(e){}
   }
+  window._pendingRequest=null;
   }catch(e){alert('Submit error: '+e.message);}
 }
 
