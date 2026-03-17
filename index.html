@@ -396,7 +396,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.16.5</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.16.6</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -6225,27 +6225,27 @@ function fillFromRequest(ridx){
   opsFormCache={
     unit:req.unitRequesting||'',
     date:req.opFrom?req.opFrom.split('T')[0]:'',
-    systems:[]
+    items:[]
   };
   // Add each chute type from paraLines
   if(req.paraLines&&req.paraLines.length>0){
     req.paraLines.forEach(function(pl){
-      // Map request type names to system types
       var sys=pl.type;
-      if(sys.includes('T-11')) sys='T-11';
+      if(sys.includes('T-11')&&!sys.includes('T-11R')) sys='T-11';
       else if(sys.includes('MC6')||sys.includes('MC-6')) sys='MC-6';
       else if(sys.includes('RA-1R')) sys='RA-1R';
       else if(sys.includes('RA-1')) sys='RA-1';
-      opsFormCache.systems.push({system:sys,qty:parseInt(pl.qty)||0});
+      opsFormCache.items.push({system:sys,qty:parseInt(pl.qty)||0});
     });
   } else if(req.paraType&&req.paraQty){
     var sys=req.paraType;
-    if(sys.includes('T-11')) sys='T-11';
+    if(sys.includes('T-11')&&!sys.includes('T-11R')) sys='T-11';
     else if(sys.includes('MC6')||sys.includes('MC-6')) sys='MC-6';
     else if(sys.includes('RA-1R')) sys='RA-1R';
     else if(sys.includes('RA-1')) sys='RA-1';
-    opsFormCache.systems.push({system:sys,qty:parseInt(req.paraQty)||0});
+    opsFormCache.items.push({system:sys,qty:parseInt(req.paraQty)||0});
   }
+  if(opsFormCache.items.length===0) opsFormCache.items.push({system:'',qty:0});
   renderOps();
   toast('Filled from '+req.unitRequesting+' request','success',2000);
 }
@@ -7617,8 +7617,27 @@ function newParaRequest(){
   document.body.appendChild(overlay);
   document.getElementById('rqCancelBtn').addEventListener('click',function(){overlay.remove();});
   document.getElementById('rqSubmitBtn').addEventListener('click',function(){
-    submitParaRequest();
-    overlay.remove();
+    // Validate
+    var pn=((document.getElementById('rqPOCName')||{}).value||'').trim();
+    var pe=((document.getElementById('rqPOCEmail')||{}).value||'').trim();
+    var pp=((document.getElementById('rqPOCPhone')||{}).value||'').trim();
+    var dz=((document.getElementById('rqDZ')||{}).value||'').trim();
+    var unitVal=(document.getElementById('rqUnit')||{}).value||'';
+    var lines=document.querySelectorAll('.para-req-line');
+    var paraSum=[];
+    lines.forEach(function(el){var t=el.querySelector('.rqParaType');var q=el.querySelector('.rqParaQty');if(t&&q&&q.value)paraSum.push(t.value+' x'+q.value);});
+    
+    if(!pn){toast('Enter POC name','error');return;}
+    if(!pe){toast('Enter POC email','error');return;}
+    if(!pp){toast('Enter POC phone','error');return;}
+    if(paraSum.length===0){toast('Add chute type with quantity','error');return;}
+    
+    var msg='Unit: '+unitVal+'\nPOC: '+pn+'\nPhone: '+pp+'\nEmail: '+pe+'\nDZ: '+(dz||'N/A')+'\nChutes: '+paraSum.join(', ')+'\n\nSubmit this request?';
+    if(confirm(msg)){
+      submitParaRequest();
+      overlay.remove();
+    }
+    // If cancel, form stays open
   });
 }
 
