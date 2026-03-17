@@ -396,7 +396,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.17.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.17.1</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -7617,12 +7617,16 @@ function newParaRequest(){
   document.body.appendChild(overlay);
   document.getElementById('rqCancelBtn').addEventListener('click',function(){overlay.remove();});
   document.getElementById('rqSubmitBtn').addEventListener('click',function(){
-    // Validate
     var pn=((document.getElementById('rqPOCName')||{}).value||'').trim();
     var pe=((document.getElementById('rqPOCEmail')||{}).value||'').trim();
     var pp=((document.getElementById('rqPOCPhone')||{}).value||'').trim();
     var dz=((document.getElementById('rqDZ')||{}).value||'').trim();
+    var airfield=((document.getElementById('rqAirfield')||{}).value||'').trim();
     var unitVal=(document.getElementById('rqUnit')||{}).value||'';
+    var opFrom=(document.getElementById('rqOpFrom')||{}).value||'';
+    var returnDt=((document.getElementById('rqReturn')||{}).value||'');
+    var pickupPOC=((document.getElementById('rqPickupPOC')||{}).value||'').trim();
+    var pickupPhone=((document.getElementById('rqPickupPhone')||{}).value||'').trim();
     var lines=document.querySelectorAll('.para-req-line');
     var paraSum=[];
     lines.forEach(function(el){var t=el.querySelector('.rqParaType');var q=el.querySelector('.rqParaQty');if(t&&q&&q.value)paraSum.push(t.value+' x'+q.value);});
@@ -7632,12 +7636,26 @@ function newParaRequest(){
     if(!pp){toast('Enter POC phone','error');return;}
     if(paraSum.length===0){toast('Add chute type with quantity','error');return;}
     
-    var msg='Unit: '+unitVal+'\nPOC: '+pn+'\nPhone: '+pp+'\nEmail: '+pe+'\nDZ: '+(dz||'N/A')+'\nChutes: '+paraSum.join(', ')+'\n\nSubmit this request?';
-    if(confirm(msg)){
-      submitParaRequest();
-      overlay.remove();
-    }
-    // If cancel, form stays open
+    // Close form, show styled confirm
+    overlay.remove();
+    
+    var summary='<div style="text-align:left;font-size:13px;line-height:2;">';
+    summary+='<strong>Unit:</strong> '+esc(unitVal)+'<br>';
+    summary+='<strong>POC:</strong> '+esc(pn)+' / '+esc(pp)+' / '+esc(pe)+'<br>';
+    summary+='<strong>Op Date:</strong> '+esc(opFrom||'')+'<br>';
+    summary+='<strong>Airfield:</strong> '+esc(airfield||'')+'<br>';
+    summary+='<strong>DZ:</strong> '+esc(dz||'')+'<br>';
+    summary+='<strong>Main Chute:</strong> '+paraSum.join(', ')+'<br>';
+    summary+='<strong>Return Date:</strong> '+esc(returnDt||'')+'<br>';
+    summary+='<strong>Pickup POC:</strong> '+esc(pickupPOC||'')+(pickupPhone?' ('+esc(pickupPhone)+')':'')+'<br>';
+    summary+='</div>';
+    
+    showConfirm('Confirm Request',summary,
+      [{label:'Go Back',cls:'btn-secondary',fn:function(){newParaRequest();}},
+       {label:'Submit Request',cls:'btn-primary',fn:function(){
+         submitParaRequest();
+         toast('Request submitted! An admin will review it.','success',5000);
+       }}]);
   });
 }
 
