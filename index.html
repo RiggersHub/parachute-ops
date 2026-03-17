@@ -397,7 +397,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.17.7</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.17.8</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -1187,6 +1187,7 @@ async function getUsersDB() {
       lastName: u.last_name,
       role: u.role,
       pin: u.pin,
+      email: u.email || '',
       _dbId: u.id
     }));
   }
@@ -1211,7 +1212,8 @@ async function saveUsersDB(users) {
         name: u.name,
         last_name: u.lastName || u.name,
         role: u.role,
-        pin: u.pin
+        pin: u.pin,
+        email: u.email || ''
       };
       if (existingMap[u.name]) {
         // Update existing
