@@ -397,7 +397,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.18.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.18.1</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -7465,7 +7465,6 @@ function renderRequests(){
   
   if(pending.length>0){
     html+='<div style="font-size:14px;font-weight:600;margin-bottom:8px;color:var(--warning);">Pending Requests ('+pending.length+')</div>';
-    pending.forEach(function(req,idx){renderRequestCard(req,idx,html);});
     pending.forEach(function(req){
       var ridx=S.paraRequests.indexOf(req);
       html+=buildRequestCard(req,ridx);
@@ -8034,7 +8033,7 @@ var RESEND_API_KEY='re_UbustvEt_ApW688HLUFv7eJR8aSxmdC7J';
 
 async function sendEmail(to, subject, htmlBody){
   if(!to||!subject) return;
-  toast('Sending email to '+to+'...','info',2000);
+  alert('Attempting email to: '+to);
   try{
     var response=await fetch('https://api.resend.com/emails',{
       method:'POST',
@@ -8050,15 +8049,10 @@ async function sendEmail(to, subject, htmlBody){
       })
     });
     var data=await response.json();
-    if(response.ok){
-      toast('Email sent!','success',3000);
-      return true;
-    } else {
-      toast('Email error: '+(data.message||data.statusCode||JSON.stringify(data)),'error',5000);
-      return false;
-    }
+    alert('Email response: '+response.status+' '+JSON.stringify(data));
+    return response.ok;
   }catch(e){
-    toast('Email failed: '+e.message,'error',5000);
+    alert('Email fetch error: '+e.message);
     return false;
   }
 }
