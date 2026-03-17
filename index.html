@@ -396,7 +396,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.16.1</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.16.2</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -1787,6 +1787,7 @@ function doLogin(){
   updateUserDisplay();
   // Merge any shared requests submitted from login page
   var sharedReqs=JSON.parse(localStorage.getItem('pms_shared_requests')||'[]');
+  alert('LOGIN: shared requests found: '+sharedReqs.length+', S.paraRequests: '+(S.paraRequests?S.paraRequests.length:'undefined'));
   if(sharedReqs.length>0){
     if(!S.paraRequests) S.paraRequests=[];
     sharedReqs.forEach(function(sr){
@@ -7599,6 +7600,7 @@ function submitParaRequest(){
     var q=el.querySelector('.rqParaQty');
     if(t&&q&&q.value) paraLines.push({type:t.value,qty:q.value});
   });
+  alert('paraLines found: '+paraLines.length);
   if(paraLines.length===0){toast('Add at least one chute type with quantity','error');return;}
   var paraSummary=paraLines.map(function(p){return p.type+' x'+p.qty;}).join(', ');
   var totalParaQty=paraLines.reduce(function(s,p){return s+parseInt(p.qty||0);},0);
