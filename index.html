@@ -397,7 +397,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.17.9</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.18.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -7803,8 +7803,6 @@ function submitParaRequest(){
   }
   // Send email notification to admins
   try{notifyAdminsNewRequest(req);}catch(e){}
-  // Notify admins via email
-  try{notifyAdminsNewRequest(req);}catch(e){}
   
   window._pendingRequest=null;
   }catch(e){alert('Submit error: '+e.message);}
@@ -8036,6 +8034,7 @@ var RESEND_API_KEY='re_UbustvEt_ApW688HLUFv7eJR8aSxmdC7J';
 
 async function sendEmail(to, subject, htmlBody){
   if(!to||!subject) return;
+  toast('Sending email to '+to+'...','info',2000);
   try{
     var response=await fetch('https://api.resend.com/emails',{
       method:'POST',
@@ -8052,16 +8051,14 @@ async function sendEmail(to, subject, htmlBody){
     });
     var data=await response.json();
     if(response.ok){
-      console.log('Email sent:',data.id);
-      toast('Email notification sent','success',2000);
+      toast('Email sent!','success',3000);
       return true;
     } else {
-      console.log('Email error:',data);
-      toast('Email failed: '+(data.message||JSON.stringify(data)),'warning',4000);
+      toast('Email error: '+(data.message||data.statusCode||JSON.stringify(data)),'error',5000);
       return false;
     }
   }catch(e){
-    console.log('Email failed:',e.message);
+    toast('Email failed: '+e.message,'error',5000);
     return false;
   }
 }
