@@ -396,7 +396,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.17.2</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.17.3</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -1373,7 +1373,8 @@ async function loadFromDB() {
     S.masterInventory[inv.serial_number] = {
       dom: inv.dom || '',
       pis: inv.pis || '',
-      osd: inv.osd || ''
+      osd: inv.osd || '',
+      systemType: inv.system_type || ''
     };
   });
   
@@ -1509,7 +1510,8 @@ async function saveToDB() {
       serial_number: sn,
       dom: S.masterInventory[sn].dom || '',
       pis: S.masterInventory[sn].pis || '',
-      osd: S.masterInventory[sn].osd || ''
+      osd: S.masterInventory[sn].osd || '',
+      system_type: S.masterInventory[sn].systemType || ''
     }));
     if (invRows.length > 0) {
       // Insert in batches of 500
@@ -4777,7 +4779,7 @@ function createSnapshot(label){
     (S.statusCounts[sys]?.popped||[]).forEach(e=>totalPopped+=(parseInt(e.count)||0));
     (S.statusCounts[sys]?.maintenance||[]).forEach(e=>totalMaint+=(parseInt(e.count)||0));
   });
-  (S.signedOut||[]).filter(function(s){return s.status==='out'||!s.status;}).forEach(s=>totalSignedOut+=(parseInt(s.count)||0));
+  (S.signedOut||[]).filter(function(s){return (s.status==='out'||!s.status)&&!s._requestId;}).forEach(s=>totalSignedOut+=(parseInt(s.count)||0));
 
   const sectionData=S.sections.map(sec=>({
     binLocation:sec.binLocation, systemType:sec.systemType, maxChutes:sec.maxChutes,
@@ -4924,7 +4926,7 @@ function printPSR(){
   });
 
   let totalSignedOut=0;
-  (S.signedOut||[]).filter(function(s){return s.status==='out'||!s.status;}).forEach(s=>totalSignedOut+=(parseInt(s.count)||0));
+  (S.signedOut||[]).filter(function(s){return (s.status==='out'||!s.status)&&!s._requestId;}).forEach(s=>totalSignedOut+=(parseInt(s.count)||0));
 
   // Capacity
   // Total capacity from equipment counts (configurable in PSR)
@@ -5139,7 +5141,7 @@ function renderWeekly(){
 
   // Signed out total (current, rolls over)
   let totalSignedOut=0;
-  (S.signedOut||[]).filter(function(s){return s.status==='out'||!s.status;}).forEach(s=>totalSignedOut+=(parseInt(s.count)||0));
+  (S.signedOut||[]).filter(function(s){return (s.status==='out'||!s.status)&&!s._requestId;}).forEach(s=>totalSignedOut+=(parseInt(s.count)||0));
 
   // Build weeks — current week + past 11 weeks (12 total)
   const weeks=[];
