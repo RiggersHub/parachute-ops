@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1.8.4/dist/quagga.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#6366f1">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -397,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.18.1</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.18.2</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -8028,33 +8029,32 @@ function testEmail(){
 }
 
 
-// ══ EMAIL NOTIFICATIONS (Resend) ══
-var RESEND_API_KEY='re_UbustvEt_ApW688HLUFv7eJR8aSxmdC7J';
+// ══ EMAIL NOTIFICATIONS (EmailJS) ══
+var EMAILJS_PUBLIC_KEY='k3uoqvSjeRt6yYZMA';
+var EMAILJS_SERVICE_ID='service_hjjumgt';
+var EMAILJS_TEMPLATE_ID='template_qtn5d49';
+
+// Initialize EmailJS
+(function(){try{emailjs.init(EMAILJS_PUBLIC_KEY);}catch(e){}})();
 
 async function sendEmail(to, subject, htmlBody){
-  if(!to||!subject) return;
-  alert('Attempting email to: '+to);
-  try{
-    var response=await fetch('https://api.resend.com/emails',{
-      method:'POST',
-      headers:{
-        'Content-Type':'application/json',
-        'Authorization':'Bearer '+RESEND_API_KEY
-      },
-      body:JSON.stringify({
-        from:'PMS Alerts <onboarding@resend.dev>',
-        to:Array.isArray(to)?to:[to],
-        subject:subject,
-        html:htmlBody
-      })
-    });
-    var data=await response.json();
-    alert('Email response: '+response.status+' '+JSON.stringify(data));
-    return response.ok;
-  }catch(e){
-    alert('Email fetch error: '+e.message);
-    return false;
+  if(!to||!subject) return false;
+  var toList=Array.isArray(to)?to:[to];
+  var success=true;
+  for(var i=0;i<toList.length;i++){
+    try{
+      await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+        to_email: toList[i],
+        subject: subject,
+        message: htmlBody
+      });
+    }catch(e){
+      console.log('Email to '+toList[i]+' failed:',e);
+      success=false;
+    }
   }
+  if(success) toast('Email notification sent','success',2000);
+  return success;
 }
 
 function getAdminEmails(){
