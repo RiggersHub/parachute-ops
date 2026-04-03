@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.19.5</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.19.6</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -4690,17 +4690,24 @@ function renderPSR(){
   sysList.forEach(function(sys){totalP+=sysAvail[sys].packed;html+='<td style="text-align:right;"><strong>'+sysAvail[sys].packed+'</strong></td>';});
   html+='<td style="text-align:right;"><strong>'+totalP+'</strong></td></tr>';
   
-  // Expiring row
-  html+='<tr><td>Expiring (6mo)</td>';
-  var totalE=0;
-  sysList.forEach(function(sys){totalE+=sysAvail[sys].expiring;html+='<td style="text-align:right;" class="exp-30">'+sysAvail[sys].expiring+'</td>';});
-  html+='<td style="text-align:right;" class="exp-30">'+totalE+'</td></tr>';
+  // Requested (ABN Ops) row
+  html+='<tr><td>Requested (ABN Ops)</td>';
+  var totalReq=0;
+  sysList.forEach(function(sys){totalReq+=sysAvail[sys].requested;html+='<td style="text-align:right;">'+sysAvail[sys].requested+'</td>';});
+  html+='<td style="text-align:right;">'+totalReq+'</td></tr>';
   
   // Signed Out row
   html+='<tr><td>Signed Out</td>';
   var totalSO=0;
   sysList.forEach(function(sys){totalSO+=sysAvail[sys].signedOut;html+='<td style="text-align:right;">'+sysAvail[sys].signedOut+'</td>';});
   html+='<td style="text-align:right;">'+totalSO+'</td></tr>';
+  
+  // Expiring current month row
+  var monthNames=['January','February','March','April','May','June','July','August','September','October','November','December'];
+  html+='<tr><td>Expiring '+monthNames[curMonth]+'</td>';
+  var totalE=0;
+  sysList.forEach(function(sys){totalE+=sysAvail[sys].expiring;html+='<td style="text-align:right;" class="exp-30">'+sysAvail[sys].expiring+'</td>';});
+  html+='<td style="text-align:right;" class="exp-30">'+totalE+'</td></tr>';
   
   // Available row
   html+='<tr style="border-top:2px solid var(--border);"><td><strong>Available</strong></td>';
@@ -4713,7 +4720,7 @@ function renderPSR(){
   html+='<td style="text-align:right;"><strong class="'+(totalA<0?'exp-expired':'')+'">'+totalA+'</strong></td></tr>';
   
   html+=`</tbody></table>
-  </div>\``;
+  </div>`;
 
   // Expiring chutes - only show if there are any
   if(hasExpiring){
