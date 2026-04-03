@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.19.4</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.19.5</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -1414,6 +1414,7 @@ async function loadFromDB() {
       if(extra.archive) S.archive=extra.archive;
       if(extra.abnOps) S.abnOps=extra.abnOps;
       if(extra.paraRequests) S.paraRequests=extra.paraRequests;
+      if(extra.archivedRequests) S.archivedRequests=extra.archivedRequests;
       if(extra.capacityT11) S.capacityT11=extra.capacityT11;
       if(extra.capacityMC6) S.capacityMC6=extra.capacityMC6;
       if(extra.capacityRA1) S.capacityRA1=extra.capacityRA1;
@@ -1587,6 +1588,7 @@ async function saveToDB() {
       archive: S.archive || {deletedSections:[],deletedRows:[]},
       abnOps: S.abnOps || [],
       paraRequests: S.paraRequests || [],
+      archivedRequests: S.archivedRequests || [],
       capacityT11: S.capacityT11 || 0,
       capacityMC6: S.capacityMC6 || 0,
       capacityRA1: S.capacityRA1 || 0
@@ -4648,16 +4650,18 @@ function renderPSR(){
   // Per-system availability
   var sysList=['T-11','MC-6','RA-1'];
   var sysAvail={};
+  var nowDate=new Date();
+  var curMonth=nowDate.getMonth();
+  var curYear=nowDate.getFullYear();
   sysList.forEach(function(sys){
-    var packed=0,expiring=0,signedOut=0,maint=0;
+    var packed=0,expiringThisMonth=0,signedOut=0,requested=0;
     S.sections.forEach(function(sec){
       if(sec.systemType!==sys) return;
       sec.rows.forEach(function(r){
         if(r.serialNumber&&r.packer&&r.ip&&!r._signedOut&&!r._popped) packed++;
-        if(r.expirationDate){
-          var d=new Date(r.expirationDate);
-          var days=(d-new Date())/(1000*60*60*24);
-          if(days<=182&&!r._signedOut&&!r._popped) expiring++;
+        if(r.expirationDate&&!r._signedOut&&!r._popped){
+          var d=new Date(r.expirationDate+'T00:00:00');
+          if(d.getMonth()===curMonth&&d.getFullYear()===curYear) expiringThisMonth++;
         }
       });
     });
@@ -4666,7 +4670,12 @@ function renderPSR(){
         signedOut+=parseInt(so.count)||0;
       }
     });
-    sysAvail[sys]={packed:packed,expiring:expiring,signedOut:signedOut,available:packed-expiring-signedOut};
+    (S.abnOps||[]).forEach(function(op){
+      var opSys=(op.system||'').trim();
+      if(opSys===sys) requested+=parseInt(op.requested)||0;
+    });
+    sysAvail[sys]={packed:packed,expiring:expiringThisMonth,signedOut:signedOut,requested:requested,
+      available:packed-requested-signedOut-expiringThisMonth};
   });
   
   html+=`<div>
