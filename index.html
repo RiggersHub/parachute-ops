@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.19.2</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.19.3</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -462,6 +462,7 @@
       <h1 class="page-title">Rigger Pack Records</h1>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-secondary" onclick="importData()">📂 Import</button>
+        <button class="btn btn-secondary" onclick="generateBinBarcodes()">Print Bin Barcodes</button>
         <button class="btn btn-primary" id="btnAddSection">➕ Add Section</button>
       </div>
     </div>
@@ -3815,7 +3816,7 @@ const FACILITY_CONFIGS={
   },
   mff:{
     label:'Military Free Fall',
-    systems:['RA-1','RA-1R','RA-1 DBSL','MC-6','Cypress AAD','Altimeter'],
+    systems:['RA-1','RA-1R','RA-1 DBSL','Cypress AAD','Altimeter'],
     defaultMax:{default:30},
     statusDefault:['Popped','Maintenance','Expired']
   }
@@ -8016,15 +8017,30 @@ function negotiateRequest(ridx){
 }
 
 function deleteRequest(ridx){
-  showConfirm('Delete Request','Delete this parachute request?',
+  var req=S.paraRequests[ridx];
+  if(!req) return;
+  showConfirm('Delete Request','Delete request from <strong>'+esc(req.unitRequesting||'')+'</strong>? Archived for 30 days.',
     [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
      {label:'Delete',cls:'btn-danger',fn:function(){
-       S.paraRequests.splice(ridx,1);
+       var deleted=S.paraRequests.splice(ridx,1)[0];
+       deleted._deletedAt=new Date().toISOString();
+       if(!S.archivedRequests) S.archivedRequests=[];
+       S.archivedRequests.push(deleted);
        save();
-       try{renderRequests();}catch(e){}
        try{renderHome();}catch(e){}
-       toast('Request deleted','warning');
+       toast('Request archived. <button onclick="undoDeleteRequest()" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:4px;cursor:pointer;margin-left:6px;font-weight:600;">UNDO</button>','warning',10000);
      }}]);
+}
+
+function undoDeleteRequest(){
+  if(!S.archivedRequests||S.archivedRequests.length===0) return;
+  var req=S.archivedRequests.pop();
+  delete req._deletedAt;
+  if(!S.paraRequests) S.paraRequests=[];
+  S.paraRequests.unshift(req);
+  save();
+  try{renderHome();}catch(e){}
+  toast('Request restored','success');
 }
 
 
