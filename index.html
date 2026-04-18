@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.19.7</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.19.8</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -1366,6 +1366,7 @@ async function loadFromDB() {
       binLocation: sec.bin_location,
       systemType: sec.system_type,
       maxChutes: sec.max_chutes,
+      bulkCount: sec.bulk_count || 0,
       rows: rows,
       createdAt: sec.created_at,
       _dbId: sec.id
@@ -1458,7 +1459,8 @@ async function saveToDB() {
         unit_id: activeUnitId,
         bin_location: sec.binLocation,
         system_type: sec.systemType,
-        max_chutes: sec.maxChutes
+        max_chutes: sec.maxChutes,
+        bulk_count: sec.bulkCount || 0
       };
       
       if (sec._dbId && existingSecIds.includes(sec._dbId)) {
@@ -4453,10 +4455,10 @@ function renderPSR(){
   const ipToday={};
 
   S.sections.forEach(sec=>{
-    totalChutes+=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;}).length;
+    totalChutes+=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;}).length+(parseInt(sec.bulkCount)||0);
     totalCapacity+=sec.maxChutes;
     if(!systemTotals[sec.systemType]) systemTotals[sec.systemType]={count:0,capacity:0};
-    systemTotals[sec.systemType].count+=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;}).length;
+    systemTotals[sec.systemType].count+=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;}).length+(parseInt(sec.bulkCount)||0);
     systemTotals[sec.systemType].capacity+=sec.maxChutes;
 
     let earliestExp=null;
