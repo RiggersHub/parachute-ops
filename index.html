@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.20.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.20.1</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -4684,7 +4684,7 @@ function renderPSR(){
     var packed=0,expiringThisMonth=0,signedOut=0,requested=0;
     S.sections.forEach(function(sec){
       if(sec.systemType!==sys) return;
-      packed+=parseInt(sec.bulkCount)||0;
+      packed+=Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
       sec.rows.forEach(function(r){
         if(r.serialNumber&&r.packer&&r.ip&&!r._signedOut&&!r._popped) packed++;
         if(r.expirationDate&&!r._signedOut&&!r._popped){
@@ -6494,11 +6494,13 @@ function opsCalcSignOut(){
     bins.forEach(function(bin){
       if(remaining<=0) return;
       var pull=Math.min(remaining,bin.available);
+      var bulkPull=Math.min(pull,bin.bulkAvail||0);
+      var rowPull=pull-bulkPull;
       remaining-=pull;
       var now=new Date();
       var expDate=bin.earliestExp?new Date(bin.earliestExp+'T00:00:00'):null;
       var daysLeft=expDate?Math.ceil((expDate-now)/(24*60*60*1000)):'?';
-      allBins.push({system:bin.systemType,bin:bin.binLocation,pull:pull,available:bin.available,earliestExp:bin.earliestExp,daysLeft:daysLeft,secId:bin.secId});
+      allBins.push({system:bin.systemType,bin:bin.binLocation,pull:pull,bulkPull:bulkPull,rowPull:rowPull,available:bin.available,earliestExp:bin.earliestExp,daysLeft:daysLeft,secId:bin.secId});
     });
   });
   
@@ -6563,6 +6565,17 @@ function opsExecuteSignOut(){
     scannedOut:[],
     signOutTime:new Date().toISOString()
   };
+  
+  // Deduct bulk counts from sections
+  (plan.plans||[]).forEach(function(p){
+    if(p.bulkPull&&p.bulkPull>0){
+      var sec=S.sections.find(function(s){return s.id===p.secId;});
+      if(sec){
+        if(!sec._bulkSignedOut) sec._bulkSignedOut=0;
+        sec._bulkSignedOut+=p.bulkPull;
+      }
+    }
+  });
   
   S.signedOut.push(so);
   var signOutIdx=S.signedOut.length-1;
