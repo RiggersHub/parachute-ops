@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.19.8</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.19.9</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -4763,7 +4763,7 @@ function renderPSR(){
   S.sections.forEach(sec=>{
     if(!packedBySystem[sec.systemType]) packedBySystem[sec.systemType]=0;
     var packedRows=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;});
-    packedBySystem[sec.systemType]+=packedRows.length;
+    packedBySystem[sec.systemType]+=packedRows.length+(parseInt(sec.bulkCount)||0);
   });
 
   let hasPopped=false;
@@ -4868,7 +4868,7 @@ function takeSnapshot(){
 
 function createSnapshot(label){
   let totalChutes=0, totalPopped=0, totalSignedOut=0, totalMaint=0;
-  S.sections.forEach(sec=>totalChutes+=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;}).length);
+  S.sections.forEach(sec=>totalChutes+=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;}).length+(parseInt(sec.bulkCount)||0));
   STATUS_SYS.forEach(sys=>{
     (S.statusCounts[sys]?.popped||[]).forEach(e=>totalPopped+=(parseInt(e.count)||0));
     (S.statusCounts[sys]?.maintenance||[]).forEach(e=>totalMaint+=(parseInt(e.count)||0));
@@ -4998,10 +4998,10 @@ function printPSR(){
   let totalChutes=0, totalExpired=0, expiring7=0, expiring30=0;
   const packedBySys={};
   S.sections.forEach(sec=>{
-    totalChutes+=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;}).length;
+    totalChutes+=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;}).length+(parseInt(sec.bulkCount)||0);
     if(!packedBySys[sec.systemType]) packedBySys[sec.systemType]=0;
     var packedRows=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;});
-    packedBySys[sec.systemType]+=packedRows.length;
+    packedBySys[sec.systemType]+=packedRows.length+(parseInt(sec.bulkCount)||0);
     sec.rows.forEach(r=>{
       if(r.expirationDate){
         const exp=new Date(r.expirationDate+'T00:00:00');
@@ -5231,7 +5231,7 @@ function renderWeekly(){
     let totalPacked=0, totalExpired=0, popped=0;
     S.sections.forEach(sec=>{
       if(sec.systemType!==sys) return;
-      totalPacked+=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;}).length;
+      totalPacked+=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;}).length+(parseInt(sec.bulkCount)||0);
       sec.rows.forEach(r=>{
         if(r.expirationDate){
           const exp=new Date(r.expirationDate+'T00:00:00');
