@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.19.9</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.20.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -2703,14 +2703,22 @@ function setBulkCount(secId){
   var sec=S.sections.find(function(s){return s.id===secId;});
   if(!sec) return;
   var current=sec.bulkCount||0;
-  showConfirm('Set Packed Count','<div style="text-align:left;"><div style="font-size:12px;margin-bottom:8px;">Set a packed chute count for <strong>'+esc(sec.binLocation)+'</strong> ('+esc(sec.systemType)+') without entering serial numbers. These count toward PSR packed totals.</div><div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Current count: '+current+'</div><input type="number" id="bulkCountInput" min="0" value="'+current+'" placeholder="Number of packed chutes" style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:8px;font-size:13px;width:100%;outline:none;"></div>',
+  showConfirm('Set Packed Count','<div style="text-align:left;"><div style="font-size:12px;margin-bottom:8px;">Set a packed chute count for <strong>'+esc(sec.binLocation)+'</strong> ('+esc(sec.systemType)+') without entering serial numbers.</div><div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Current count: '+current+'</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><div><label style="font-size:10px;color:var(--text-muted);display:block;">Count</label><input type="number" id="bulkCountInput" min="0" value="'+current+'" placeholder="Qty" style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:8px;font-size:13px;width:100%;outline:none;"></div><div><label style="font-size:10px;color:var(--text-muted);display:block;">Pack Date</label><input type="date" id="bulkPackDate" value="'+(sec.bulkPackDate||new Date().toISOString().split("T")[0])+'" style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:8px;font-size:13px;width:100%;outline:none;"></div></div></div>',
     [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
      {label:'Set Count',cls:'btn-primary',fn:function(){
        var val=parseInt(document.getElementById('bulkCountInput').value)||0;
+       var packDate=document.getElementById('bulkPackDate').value||new Date().toISOString().split('T')[0];
        sec.bulkCount=val;
+       sec.bulkPackDate=packDate;
+       // Calculate expiration based on system type
+       var expDays=182;
+       if(typeof CFG!=='undefined'&&CFG[sec.systemType]&&CFG[sec.systemType].expDays) expDays=CFG[sec.systemType].expDays;
+       var expDate=new Date(packDate+'T00:00:00');
+       expDate.setDate(expDate.getDate()+expDays);
+       sec.bulkExpDate=expDate.toISOString().split('T')[0];
        save();
        renderSections();
-       toast(sec.binLocation+': '+val+' packed chutes set','success');
+       toast(sec.binLocation+': '+val+' packed (exp '+sec.bulkExpDate+')','success');
      }}]);
 }
 
@@ -2733,7 +2741,7 @@ function sectionHTML(sec){
         ${dateInfo}
       </div>
       <div class="section-header-right">
-        <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();setBulkCount(${sec.id})" title="Set packed count without serial numbers" style="font-size:10px;padding:2px 8px;">${sec.bulkCount?'📦 '+sec.bulkCount:''}</button>
+        <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();setBulkCount(${sec.id})" title="Set packed count without serial numbers" style="font-size:10px;padding:2px 8px;">${sec.bulkCount?'📦 '+sec.bulkCount+(sec.bulkPackDate?' ('+sec.bulkPackDate+')':''):'Set Count'}</button>
         <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();delSec(${sec.id})">🗑</button>
       </div>
     </div>
@@ -4510,15 +4518,15 @@ function renderPSR(){
   // Use auth (authorized) as total capacity if set
   if(ec['T-11']&&ec['T-11'].auth) actualT11=parseInt(ec['T-11'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='T-11'||sec.systemType==='T-11R'||sec.systemType==='T-11R SP') actualT11+=sec.rows.length;
+    if(sec.systemType==='T-11'||sec.systemType==='T-11R'||sec.systemType==='T-11R SP') actualT11+=sec.rows.length+(parseInt(sec.bulkCount)||0);
   });
   if(ec['MC-6']&&ec['MC-6'].auth) actualMC6=parseInt(ec['MC-6'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='MC-6') actualMC6+=sec.rows.length;
+    if(sec.systemType==='MC-6') actualMC6+=sec.rows.length+(parseInt(sec.bulkCount)||0);
   });
   if(ec['RA-1']&&ec['RA-1'].auth) actualRA1=parseInt(ec['RA-1'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='RA-1'||sec.systemType==='RA-1R') actualRA1+=sec.rows.length;
+    if(sec.systemType==='RA-1'||sec.systemType==='RA-1R') actualRA1+=sec.rows.length+(parseInt(sec.bulkCount)||0);
   });
   // Add popped + maintenance
   ['T-11','T-11R/SP'].forEach(sys=>{
@@ -4684,6 +4692,11 @@ function renderPSR(){
           if(d.getMonth()===curMonth&&d.getFullYear()===curYear) expiringThisMonth++;
         }
       });
+      // Check bulk count expiration
+      if(sec.bulkExpDate&&(parseInt(sec.bulkCount)||0)>0){
+        var bd=new Date(sec.bulkExpDate+'T00:00:00');
+        if(bd.getMonth()===curMonth&&bd.getFullYear()===curYear) expiringThisMonth+=(parseInt(sec.bulkCount)||0);
+      }
     });
     (S.signedOut||[]).forEach(function(so){
       if(!so._requestId&&(so.system===sys||(so.system||'').includes(sys))){
@@ -5029,15 +5042,15 @@ function printPSR(){
   // Use auth (authorized) as total capacity if set
   if(ec['T-11']&&ec['T-11'].auth) actualT11=parseInt(ec['T-11'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='T-11'||sec.systemType==='T-11R'||sec.systemType==='T-11R SP') actualT11+=sec.rows.length;
+    if(sec.systemType==='T-11'||sec.systemType==='T-11R'||sec.systemType==='T-11R SP') actualT11+=sec.rows.length+(parseInt(sec.bulkCount)||0);
   });
   if(ec['MC-6']&&ec['MC-6'].auth) actualMC6=parseInt(ec['MC-6'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='MC-6') actualMC6+=sec.rows.length;
+    if(sec.systemType==='MC-6') actualMC6+=sec.rows.length+(parseInt(sec.bulkCount)||0);
   });
   if(ec['RA-1']&&ec['RA-1'].auth) actualRA1=parseInt(ec['RA-1'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='RA-1'||sec.systemType==='RA-1R') actualRA1+=sec.rows.length;
+    if(sec.systemType==='RA-1'||sec.systemType==='RA-1R') actualRA1+=sec.rows.length+(parseInt(sec.bulkCount)||0);
   });
   ['T-11','T-11R/SP'].forEach(sys=>{
     (S.statusCounts[sys]?.popped||[]).forEach(e=>actualT11+=(parseInt(e.count)||0));
