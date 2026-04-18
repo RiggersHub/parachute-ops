@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.20.2</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.20.3</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -1367,6 +1367,7 @@ async function loadFromDB() {
       systemType: sec.system_type,
       maxChutes: sec.max_chutes,
       bulkCount: sec.bulk_count || 0,
+      _bulkSignedOut: sec.bulk_signed_out || 0,
       rows: rows,
       createdAt: sec.created_at,
       _dbId: sec.id
@@ -1460,7 +1461,8 @@ async function saveToDB() {
         bin_location: sec.binLocation,
         system_type: sec.systemType,
         max_chutes: sec.maxChutes,
-        bulk_count: sec.bulkCount || 0
+        bulk_count: sec.bulkCount || 0,
+        bulk_signed_out: sec._bulkSignedOut || 0
       };
       
       if (sec._dbId && existingSecIds.includes(sec._dbId)) {
@@ -2723,7 +2725,7 @@ function setBulkCount(secId){
 }
 
 function sectionHTML(sec){
-  const rc=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;}).length+(parseInt(sec.bulkCount)||0); const soCount=sec.rows.filter(function(r){return r._signedOut;}).length; const totalRows=sec.rows.length;
+  const rc=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;}).length+Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0)); const soCount=sec.rows.filter(function(r){return r._signedOut;}).length; const totalRows=sec.rows.length;
   const earliest=getEarliestExpiration(sec);
   let dateInfo='';
   if(earliest){
@@ -6411,7 +6413,7 @@ function renderOpsBulk(el){
     html+='<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:12px;align-items:center;padding:10px;margin-bottom:8px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;">';
     html+='<div><span style="font-weight:600;color:var(--text-primary);">'+esc(bs.bin)+'</span><br><span style="font-size:10px;color:var(--text-muted);">'+esc(bs.sys)+'</span></div>';
     html+='<div style="font-size:11px;color:var(--text-muted);">Available: <strong style="color:var(--text-primary);">'+bs.avail+'</strong> / '+bs.total+(bs.packDate?' | Packed: '+bs.packDate:'')+'</div>';
-    html+='<div><input type="number" class="form-input" id="bulkIssueQty-'+bs.id+'" min="0" max="'+bs.avail+'" placeholder="Qty" style="width:70px;font-size:13px;text-align:center;"></div>';
+    html+='<div><input type="number" id="bulkIssueQty-'+bs.id+'" min="0" max="'+bs.avail+'" placeholder="Qty" style="width:70px;font-size:13px;text-align:center;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:6px;outline:none;"></div>';
     html+='<div style="font-size:10px;color:var(--text-muted);">of '+bs.avail+'</div>';
     html+='</div>';
   });
