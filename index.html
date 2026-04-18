@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.20.1</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.20.2</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -543,8 +543,8 @@
   </div>
   <div style="padding:0 24px;">
     <div style="display:flex;gap:8px;margin-bottom:16px;">
-      <button class="btn btn-secondary" id="opsModePackBtn" disabled style="flex:1;opacity:0.5;" title="Use Quick Entry in Rigger Pack Records">PACK (in RPR)</button>
-      <button class="btn btn-primary" id="opsModeOutBtn" onclick="setOpsMode('signout')" style="flex:1;">ISSUE</button>
+      <button class="btn btn-primary" id="opsModeOutBtn" onclick="setOpsMode('signout')" style="flex:1;">ISSUE (S/N)</button>
+      <button class="btn btn-secondary" id="opsModeBulkBtn" onclick="setOpsMode('bulk')" style="flex:1;">ISSUE (BULK)</button>
       <button class="btn btn-secondary" id="opsModeInBtn" onclick="setOpsMode('signin')" style="flex:1;">RETURN</button>
     </div>
     <div id="opsContent"></div>
@@ -6237,8 +6237,8 @@ var _activeSignInIdx=null;
 
 function setOpsMode(mode){
   opsMode=mode;
-  document.getElementById('opsModePackBtn').className='btn '+(mode==='pack'?'btn-primary':'btn-secondary');
   document.getElementById('opsModeOutBtn').className='btn '+(mode==='signout'?'btn-primary':'btn-secondary');
+  document.getElementById('opsModeBulkBtn').className='btn '+(mode==='bulk'?'btn-primary':'btn-secondary');
   document.getElementById('opsModeInBtn').className='btn '+(mode==='signin'?'btn-primary':'btn-secondary');
   renderOps();
 }
@@ -6269,6 +6269,7 @@ function renderOps(){
   
   if(opsMode==='pack') renderOpsPack(el);
   else if(opsMode==='signout') renderOpsSignOut(el);
+  else if(opsMode==='bulk') renderOpsBulk(el);
   else if(opsMode==='signin') renderOpsSignIn(el);
 }
 
@@ -6370,6 +6371,179 @@ function fillFromRequest(ridx){
   if(opsFormCache.items.length===0) opsFormCache.items.push({system:'',qty:0});
   renderOps();
   toast('Filled from '+req.unitRequesting+' request','success',2000);
+}
+
+
+// ═══ MODE: BULK ISSUE ═══
+function renderOpsBulk(el){
+  var html='<div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:20px;">';
+  html+='<h3 style="font-size:15px;margin-bottom:8px;">Bulk Issue Mode</h3>';
+  html+='<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">Sign out chutes by quantity from bulk-count sections (no serial numbers needed).</div>';
+  
+  // Collect sections with bulk count available
+  var bulkSections=[];
+  S.sections.forEach(function(sec){
+    var bulkTotal=parseInt(sec.bulkCount)||0;
+    var bulkUsed=parseInt(sec._bulkSignedOut)||0;
+    var bulkAvail=bulkTotal-bulkUsed;
+    if(bulkAvail>0){
+      bulkSections.push({id:sec.id,bin:sec.binLocation,sys:sec.systemType,total:bulkTotal,used:bulkUsed,avail:bulkAvail,packDate:sec.bulkPackDate||''});
+    }
+  });
+  
+  if(bulkSections.length===0){
+    html+='<div style="color:var(--text-muted);font-size:13px;padding:20px 0;text-align:center;">No bulk-count sections with available chutes.<br>Use Set Count in RPR to add bulk chutes to a section.</div>';
+    html+='</div>';
+    el.innerHTML=html;
+    return;
+  }
+  
+  // Unit and date
+  html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">';
+  html+='<div class="form-group"><label class="form-label">Unit</label><input type="text" class="form-input" id="bulkIssueUnit" placeholder="Unit name" value="'+(window._bulkIssueUnit||'')+'"></div>';
+  html+='<div class="form-group"><label class="form-label">Date</label><input type="date" class="form-input" id="bulkIssueDate" value="'+(window._bulkIssueDate||new Date().toISOString().split('T')[0])+'"></div>';
+  html+='</div>';
+  
+  // Available bulk sections
+  html+='<div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--accent);">Available Bulk Sections</div>';
+  
+  bulkSections.forEach(function(bs, idx){
+    html+='<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:12px;align-items:center;padding:10px;margin-bottom:8px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;">';
+    html+='<div><span style="font-weight:600;color:var(--text-primary);">'+esc(bs.bin)+'</span><br><span style="font-size:10px;color:var(--text-muted);">'+esc(bs.sys)+'</span></div>';
+    html+='<div style="font-size:11px;color:var(--text-muted);">Available: <strong style="color:var(--text-primary);">'+bs.avail+'</strong> / '+bs.total+(bs.packDate?' | Packed: '+bs.packDate:'')+'</div>';
+    html+='<div><input type="number" class="form-input" id="bulkIssueQty-'+bs.id+'" min="0" max="'+bs.avail+'" placeholder="Qty" style="width:70px;font-size:13px;text-align:center;"></div>';
+    html+='<div style="font-size:10px;color:var(--text-muted);">of '+bs.avail+'</div>';
+    html+='</div>';
+  });
+  
+  html+='<div style="margin-top:16px;text-align:center;"><button class="btn btn-primary" onclick="executeBulkIssue()">Sign Out Bulk Chutes</button></div>';
+  html+='</div>';
+  
+  // Active bulk sign-outs
+  var bulkSOs=(S.signedOut||[]).filter(function(so){return so._isBulk&&so.status==='out';});
+  if(bulkSOs.length>0){
+    html+='<div style="margin-top:16px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:16px;">';
+    html+='<div style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--accent);">Active Bulk Sign-Outs</div>';
+    bulkSOs.forEach(function(so,si){
+      var soIdx=S.signedOut.indexOf(so);
+      html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;margin-bottom:4px;background:var(--bg-card);border-radius:6px;">';
+      html+='<div><strong>'+esc(so.unit||'')+'</strong> | '+esc(so.system||'')+' | '+esc(so.date||'')+'</div>';
+      html+='<div style="display:flex;gap:6px;">';
+      html+='<button class="btn btn-secondary btn-sm" onclick="returnBulkIssue('+soIdx+')">Return</button>';
+      html+='</div></div>';
+    });
+    html+='</div>';
+  }
+  
+  el.innerHTML=html;
+}
+
+function executeBulkIssue(){
+  var unit=(document.getElementById('bulkIssueUnit')||{}).value||'';
+  var date=(document.getElementById('bulkIssueDate')||{}).value||new Date().toISOString().split('T')[0];
+  if(!unit.trim()){toast('Enter unit name','error');return;}
+  
+  window._bulkIssueUnit=unit.trim();
+  window._bulkIssueDate=date;
+  
+  var items=[];
+  var totalQty=0;
+  
+  S.sections.forEach(function(sec){
+    var input=document.getElementById('bulkIssueQty-'+sec.id);
+    if(!input) return;
+    var qty=parseInt(input.value)||0;
+    if(qty<=0) return;
+    
+    var bulkAvail=(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0);
+    if(qty>bulkAvail){toast(sec.binLocation+': only '+bulkAvail+' available','error');return;}
+    
+    if(!sec._bulkSignedOut) sec._bulkSignedOut=0;
+    sec._bulkSignedOut+=qty;
+    totalQty+=qty;
+    items.push({bin:sec.binLocation,system:sec.systemType,count:qty});
+  });
+  
+  if(totalQty===0){toast('Enter quantities to sign out','error');return;}
+  
+  if(!S.signedOut) S.signedOut=[];
+  S.signedOut.push({
+    unit:unit.trim(),
+    date:date,
+    system:items.map(function(it){return it.count+' '+it.system+' ('+it.bin+')';}).join(', '),
+    count:String(totalQty),
+    totalQty:totalQty,
+    items:items,
+    status:'out',
+    _isBulk:true,
+    signOutTime:new Date().toISOString()
+  });
+  
+  auditLog('signout','Bulk Sign Out','Bulk signed out to '+unit.trim()+': '+totalQty+' chutes');
+  save();
+  toast(totalQty+' chutes signed out to '+unit.trim(),'success');
+  renderOps();
+}
+
+function returnBulkIssue(soIdx){
+  var so=S.signedOut[soIdx];
+  if(!so||!so._isBulk) return;
+  
+  showConfirm('Return Bulk Chutes','Return all chutes from <strong>'+esc(so.unit)+'</strong>?<br>'+esc(so.system),
+    [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
+     {label:'Return All',cls:'btn-primary',fn:function(){
+       // Restore bulk counts to sections
+       (so.items||[]).forEach(function(item){
+         var sec=S.sections.find(function(s){return s.binLocation===item.bin&&s.systemType===item.system;});
+         if(sec){
+           sec._bulkSignedOut=Math.max(0,(parseInt(sec._bulkSignedOut)||0)-item.count);
+         }
+       });
+       so.status='returned';
+       so.returnTime=new Date().toISOString();
+       auditLog('signin','Bulk Return','Bulk returned from '+so.unit+': '+so.totalQty+' chutes');
+       save();
+       toast('Chutes returned from '+so.unit,'success');
+       renderOps();
+     }},
+     {label:'Partial Return',cls:'btn-secondary',fn:function(){
+       // Show partial return dialog
+       var partialHtml='<div style="text-align:left;">';
+       partialHtml+='<div style="font-size:12px;margin-bottom:8px;">Enter how many to return from each section:</div>';
+       (so.items||[]).forEach(function(item,ii){
+         partialHtml+='<div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">';
+         partialHtml+='<span style="flex:1;font-size:12px;">'+esc(item.bin)+' '+esc(item.system)+' ('+item.count+' out)</span>';
+         partialHtml+='<input type="number" id="partRet-'+ii+'" min="0" max="'+item.count+'" value="'+item.count+'" style="width:60px;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:4px;font-size:12px;text-align:center;">';
+         partialHtml+='</div>';
+       });
+       partialHtml+='</div>';
+       showConfirm('Partial Return',partialHtml,
+         [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
+          {label:'Return',cls:'btn-primary',fn:function(){
+            var totalReturned=0;
+            (so.items||[]).forEach(function(item,ii){
+              var retQty=parseInt((document.getElementById('partRet-'+ii)||{}).value)||0;
+              retQty=Math.min(retQty,item.count);
+              if(retQty>0){
+                var sec=S.sections.find(function(s){return s.binLocation===item.bin&&s.systemType===item.system;});
+                if(sec) sec._bulkSignedOut=Math.max(0,(parseInt(sec._bulkSignedOut)||0)-retQty);
+                item.count-=retQty;
+                totalReturned+=retQty;
+              }
+            });
+            so.totalQty-=totalReturned;
+            so.items=so.items.filter(function(it){return it.count>0;});
+            if(so.items.length===0||so.totalQty<=0){
+              so.status='returned';
+              so.returnTime=new Date().toISOString();
+            }
+            so.system=so.items.map(function(it){return it.count+' '+it.system+' ('+it.bin+')';}).join(', ')||'Returned';
+            auditLog('signin','Partial Bulk Return','Returned '+totalReturned+' from '+so.unit);
+            save();
+            toast(totalReturned+' chutes returned','success');
+            renderOps();
+          }}]);
+     }}]);
 }
 
 function renderOpsSignOut(el){
