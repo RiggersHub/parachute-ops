@@ -64,7 +64,7 @@
   .tracker-col { padding: 4px 10px; border-right: 1px solid var(--border); }
   .tracker-col:last-child { border-right: none; }
   .tracker-col-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.7px; color: var(--text-muted); margin-bottom: 4px; white-space: nowrap; display: flex; align-items: center; gap: 6px; }
-  .tracker-cards { display: flex; flex-direction: column; gap: 3px; }
+  .tracker-cards { display: flex; flex-direction: column; gap: 3px; max-height: 250px; overflow-y: auto; }
   .tracker-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 5px; padding: 3px 6px; }
   .tracker-card-label { font-size: 9px; font-weight: 600; color: var(--text-secondary); margin-bottom: 2px; display: flex; align-items: center; justify-content: space-between; }
   .tracker-card-row { display: flex; align-items: center; gap: 4px; margin-top: 1px; }
@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.19.6</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.19.7</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -2696,8 +2696,24 @@ function expClass(dateStr){
   return 'exp-ok';
 }
 
+
+function setBulkCount(secId){
+  var sec=S.sections.find(function(s){return s.id===secId;});
+  if(!sec) return;
+  var current=sec.bulkCount||0;
+  showConfirm('Set Packed Count','<div style="text-align:left;"><div style="font-size:12px;margin-bottom:8px;">Set a packed chute count for <strong>'+esc(sec.binLocation)+'</strong> ('+esc(sec.systemType)+') without entering serial numbers. These count toward PSR packed totals.</div><div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Current count: '+current+'</div><input type="number" id="bulkCountInput" min="0" value="'+current+'" placeholder="Number of packed chutes" style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:8px;font-size:13px;width:100%;outline:none;"></div>',
+    [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
+     {label:'Set Count',cls:'btn-primary',fn:function(){
+       var val=parseInt(document.getElementById('bulkCountInput').value)||0;
+       sec.bulkCount=val;
+       save();
+       renderSections();
+       toast(sec.binLocation+': '+val+' packed chutes set','success');
+     }}]);
+}
+
 function sectionHTML(sec){
-  const rc=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;}).length; const soCount=sec.rows.filter(function(r){return r._signedOut;}).length; const totalRows=sec.rows.length;
+  const rc=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;}).length+(parseInt(sec.bulkCount)||0); const soCount=sec.rows.filter(function(r){return r._signedOut;}).length; const totalRows=sec.rows.length;
   const earliest=getEarliestExpiration(sec);
   let dateInfo='';
   if(earliest){
@@ -2715,6 +2731,7 @@ function sectionHTML(sec){
         ${dateInfo}
       </div>
       <div class="section-header-right">
+        <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();setBulkCount(${sec.id})" title="Set packed count without serial numbers" style="font-size:10px;padding:2px 8px;">${sec.bulkCount?'📦 '+sec.bulkCount:''}</button>
         <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();delSec(${sec.id})">🗑</button>
       </div>
     </div>
@@ -4657,6 +4674,7 @@ function renderPSR(){
     var packed=0,expiringThisMonth=0,signedOut=0,requested=0;
     S.sections.forEach(function(sec){
       if(sec.systemType!==sys) return;
+      packed+=parseInt(sec.bulkCount)||0;
       sec.rows.forEach(function(r){
         if(r.serialNumber&&r.packer&&r.ip&&!r._signedOut&&!r._popped) packed++;
         if(r.expirationDate&&!r._signedOut&&!r._popped){
