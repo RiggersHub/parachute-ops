@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.20.4</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.20.7</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -1417,6 +1417,7 @@ async function loadFromDB() {
       if(extra.abnOps) S.abnOps=extra.abnOps;
       if(extra.paraRequests) S.paraRequests=extra.paraRequests;
       if(extra.archivedRequests) S.archivedRequests=extra.archivedRequests;
+      if(extra.archivedSignOuts) S.archivedSignOuts=extra.archivedSignOuts;
       if(extra.capacityT11) S.capacityT11=extra.capacityT11;
       if(extra.capacityMC6) S.capacityMC6=extra.capacityMC6;
       if(extra.capacityRA1) S.capacityRA1=extra.capacityRA1;
@@ -1593,6 +1594,7 @@ async function saveToDB() {
       abnOps: S.abnOps || [],
       paraRequests: S.paraRequests || [],
       archivedRequests: S.archivedRequests || [],
+      archivedSignOuts: S.archivedSignOuts || [],
       capacityT11: S.capacityT11 || 0,
       capacityMC6: S.capacityMC6 || 0,
       capacityRA1: S.capacityRA1 || 0
@@ -3207,6 +3209,39 @@ function renderArchive(){
   }
 
   cont.innerHTML=html;
+
+  // Append archived requests and sign-outs
+  var extraHtml='';
+  
+  // Archived Requests
+  var reqs=S.archivedRequests||[];
+  if(reqs.length>0){
+    extraHtml+='<div style="margin-top:24px;"><div style="font-size:14px;font-weight:700;margin-bottom:8px;color:var(--accent);">Archived Parachute Requests ('+reqs.length+')</div>';
+    reqs.forEach(function(r,i){
+      var days=r._deletedAt?Math.floor((new Date()-new Date(r._deletedAt))/(1000*60*60*24)):0;
+      extraHtml+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px;margin-bottom:6px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;">';
+      extraHtml+='<div><strong>'+esc(r.unitRequesting||'')+'</strong> | '+esc(r.paraType||'')+' | '+esc(r.pocName||'')+'<br><span style="font-size:10px;color:var(--text-muted);">Deleted '+days+' days ago | Status: '+esc(r.status||'')+'</span></div>';
+      extraHtml+='<button class="btn btn-primary btn-sm" onclick="restoreArchivedRequest('+i+');renderArchive();">Restore</button>';
+      extraHtml+='</div>';
+    });
+    extraHtml+='</div>';
+  }
+  
+  // Archived Sign-Outs
+  var sos=S.archivedSignOuts||[];
+  if(sos.length>0){
+    extraHtml+='<div style="margin-top:24px;"><div style="font-size:14px;font-weight:700;margin-bottom:8px;color:var(--accent);">Archived Sign-Outs ('+sos.length+')</div>';
+    sos.forEach(function(so,i){
+      var days=so._deletedAt?Math.floor((new Date()-new Date(so._deletedAt))/(1000*60*60*24)):0;
+      extraHtml+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px;margin-bottom:6px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;">';
+      extraHtml+='<div><strong>'+esc(so.unit||'')+'</strong> | '+esc(so.system||'')+'<br><span style="font-size:10px;color:var(--text-muted);">Deleted '+days+' days ago'+(so._isBulk?' | Bulk':'')+'</span></div>';
+      extraHtml+='<button class="btn btn-primary btn-sm" onclick="restoreArchivedSignOut('+i+');renderArchive();">Restore</button>';
+      extraHtml+='</div>';
+    });
+    extraHtml+='</div>';
+  }
+  
+  if(extraHtml) cont.innerHTML+=extraHtml;
 }
 
 function toggleArchiveMonth(label){
@@ -4439,9 +4474,23 @@ function addAnnouncement(){
 function deleteAnnouncement(idx){
   const key='pms_announcements_'+getActiveUnit();
   const anns=JSON.parse(localStorage.getItem(key)||'[]');
-  anns.splice(idx,1);
+  var deleted=anns.splice(idx,1)[0];
   localStorage.setItem(key,JSON.stringify(anns));
   renderHome();
+  if(deleted){
+    window._lastDeletedAnnouncement={key:key,entry:deleted};
+    toast('Announcement deleted. <button onclick="undoDelAnnouncement()" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:4px;cursor:pointer;margin-left:6px;font-weight:600;">UNDO</button>','warning',10000);
+  }
+}
+function undoDelAnnouncement(){
+  if(!window._lastDeletedAnnouncement) return;
+  var d=window._lastDeletedAnnouncement;
+  var anns=JSON.parse(localStorage.getItem(d.key)||'[]');
+  anns.push(d.entry);
+  localStorage.setItem(d.key,JSON.stringify(anns));
+  window._lastDeletedAnnouncement=null;
+  renderHome();
+  toast('Announcement restored','success');
 }
 
 // ══ PSR DASHBOARD ══
@@ -5031,8 +5080,18 @@ function updAbnOp(idx,fld,val){
 }
 function delAbnOp(idx){
   if(!S.abnOps) return;
-  S.abnOps.splice(idx,1);
+  var deleted=S.abnOps.splice(idx,1)[0];
   save(); renderPSR();
+  toast('ABN Op deleted. <button onclick="undoDelAbnOp()" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:4px;cursor:pointer;margin-left:6px;font-weight:600;">UNDO</button>','warning',10000);
+  window._lastDeletedAbnOp=deleted;
+}
+function undoDelAbnOp(){
+  if(!window._lastDeletedAbnOp) return;
+  if(!S.abnOps) S.abnOps=[];
+  S.abnOps.push(window._lastDeletedAbnOp);
+  window._lastDeletedAbnOp=null;
+  save(); renderPSR();
+  toast('ABN Op restored','success');
 }
 
 function goToBin(secId){
@@ -8557,6 +8616,93 @@ async function notifyRequestorStatus(req, status){
   html+='</table>';
   
   await sendEmail(req.pocEmail, subject, html);
+}
+
+
+function showArchive(){
+  var html='<div style="text-align:left;max-height:70vh;overflow-y:auto;font-size:12px;">';
+  
+  // Archived Requests
+  var reqs=S.archivedRequests||[];
+  html+='<div style="font-size:14px;font-weight:700;margin-bottom:6px;color:var(--accent);">Archived Requests ('+reqs.length+')</div>';
+  if(reqs.length===0) html+='<div style="color:var(--text-muted);margin-bottom:12px;">None</div>';
+  reqs.forEach(function(r,i){
+    var days=Math.floor((new Date()-new Date(r._deletedAt))/(1000*60*60*24));
+    html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;margin-bottom:4px;background:var(--bg-input);border-radius:4px;">';
+    html+='<span>'+esc(r.unitRequesting||'')+' | '+esc(r.paraType||'')+' | Deleted '+days+'d ago</span>';
+    html+='<button class="btn btn-secondary" style="font-size:10px;padding:2px 8px;" onclick="restoreArchivedRequest('+i+')">Restore</button>';
+    html+='</div>';
+  });
+  
+  // Archived Sign-Outs
+  var sos=S.archivedSignOuts||[];
+  html+='<div style="font-size:14px;font-weight:700;margin:12px 0 6px;color:var(--accent);">Archived Sign-Outs ('+sos.length+')</div>';
+  if(sos.length===0) html+='<div style="color:var(--text-muted);margin-bottom:12px;">None</div>';
+  sos.forEach(function(so,i){
+    var days=Math.floor((new Date()-new Date(so._deletedAt))/(1000*60*60*24));
+    html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;margin-bottom:4px;background:var(--bg-input);border-radius:4px;">';
+    html+='<span>'+esc(so.unit||'')+' | '+esc(so.system||'')+' | Deleted '+days+'d ago</span>';
+    html+='<button class="btn btn-secondary" style="font-size:10px;padding:2px 8px;" onclick="restoreArchivedSignOut('+i+')">Restore</button>';
+    html+='</div>';
+  });
+  
+  // Archived Sections
+  var secs=S.archive?S.archive.deletedSections||[]:[];
+  html+='<div style="font-size:14px;font-weight:700;margin:12px 0 6px;color:var(--accent);">Archived Sections ('+secs.length+')</div>';
+  if(secs.length===0) html+='<div style="color:var(--text-muted);margin-bottom:12px;">None</div>';
+  secs.forEach(function(sec,i){
+    html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;margin-bottom:4px;background:var(--bg-input);border-radius:4px;">';
+    html+='<span>'+esc(sec.binLocation||'')+' | '+esc(sec.systemType||'')+' | '+((sec.rows||[]).length)+' rows</span>';
+    html+='<button class="btn btn-secondary" style="font-size:10px;padding:2px 8px;" onclick="restoreSection('+i+')">Restore</button>';
+    html+='</div>';
+  });
+  
+  // Archived Rows
+  var rows=S.archive?S.archive.deletedRows||[]:[];
+  html+='<div style="font-size:14px;font-weight:700;margin:12px 0 6px;color:var(--accent);">Archived Rows ('+rows.length+')</div>';
+  if(rows.length===0) html+='<div style="color:var(--text-muted);margin-bottom:12px;">None</div>';
+  rows.slice(-20).forEach(function(r,i){
+    var idx=rows.length-20+i;if(idx<0)idx=i;
+    html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;margin-bottom:4px;background:var(--bg-input);border-radius:4px;">';
+    html+='<span>S/N: '+esc(r.serialNumber||'?')+' | From: '+esc(r.fromBin||'?')+' ('+esc(r.fromSystem||'')+')</span>';
+    html+='</div>';
+  });
+  if(rows.length>20) html+='<div style="color:var(--text-muted);font-size:10px;">Showing last 20 of '+rows.length+'</div>';
+  
+  html+='</div>';
+  showConfirm('Archive',html,[{label:'Close',cls:'btn-secondary',fn:function(){}}]);
+}
+
+function restoreArchivedRequest(idx){
+  if(!S.archivedRequests||!S.archivedRequests[idx]) return;
+  var req=S.archivedRequests.splice(idx,1)[0];
+  delete req._deletedAt;
+  if(!S.paraRequests) S.paraRequests=[];
+  S.paraRequests.unshift(req);
+  save();
+  try{renderHome();}catch(e){}
+  toast('Request restored','success');
+}
+
+function restoreArchivedSignOut(idx){
+  if(!S.archivedSignOuts||!S.archivedSignOuts[idx]) return;
+  var so=S.archivedSignOuts.splice(idx,1)[0];
+  delete so._deletedAt;
+  // Re-deduct bulk counts
+  if(so._isBulk&&so.items){
+    so.items.forEach(function(item){
+      var sec=S.sections.find(function(s){return s.binLocation===item.bin&&s.systemType===item.system;});
+      if(sec){
+        if(!sec._bulkSignedOut) sec._bulkSignedOut=0;
+        sec._bulkSignedOut+=item.count;
+      }
+    });
+  }
+  if(!S.signedOut) S.signedOut=[];
+  S.signedOut.push(so);
+  save();
+  renderPSR();
+  toast('Sign-out restored','success');
 }
 
 // ══ HELP / USER GUIDE ══
