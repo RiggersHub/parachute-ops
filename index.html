@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.20.3</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.20.4</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -2743,7 +2743,7 @@ function sectionHTML(sec){
         ${dateInfo}
       </div>
       <div class="section-header-right">
-        <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();setBulkCount(${sec.id})" title="Set packed count without serial numbers" style="font-size:10px;padding:2px 8px;">${sec.bulkCount?'📦 '+sec.bulkCount+(sec.bulkPackDate?' ('+sec.bulkPackDate+')':''):'Set Count'}</button>
+        <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();setBulkCount(${sec.id})" title="Set packed count without serial numbers" style="font-size:10px;padding:2px 8px;">${sec.bulkCount?'📦 '+(parseInt(sec.bulkCount)-(parseInt(sec._bulkSignedOut)||0))+'/'+sec.bulkCount+(sec.bulkPackDate?' ('+sec.bulkPackDate+')':''):'Set Count'}</button>
         <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();delSec(${sec.id})">🗑</button>
       </div>
     </div>
@@ -4967,9 +4967,56 @@ function updSignedOut(idx,fld,val){
 function delSignedOut(idx){
   if(!S.signedOut) return;
   var old=S.signedOut[idx];
-  auditLog('signout','Sign In','Returned: '+(old?old.unit+' '+old.system+' x'+old.count:''),old);
-  S.signedOut.splice(idx,1);
-  save(); renderPSR();
+  if(!old) return;
+  
+  showConfirm('Delete Sign-Out','Remove this sign-out record?<br><strong>'+esc((old.unit||'')+' '+( old.system||''))+'</strong><br>Chutes will be returned to available.',
+    [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
+     {label:'Delete',cls:'btn-danger',fn:function(){
+       // Restore bulk counts if it was a bulk sign-out
+       if(old._isBulk&&old.items){
+         old.items.forEach(function(item){
+           var sec=S.sections.find(function(s){return s.binLocation===item.bin&&s.systemType===item.system;});
+           if(sec) sec._bulkSignedOut=Math.max(0,(parseInt(sec._bulkSignedOut)||0)-item.count);
+         });
+       }
+       
+       S.signedOut.splice(idx,1);
+       if(!S.archivedSignOuts) S.archivedSignOuts=[];
+       old._deletedAt=new Date().toISOString();
+       S.archivedSignOuts.push(old);
+       
+       auditLog('signout','Delete Sign-Out','Deleted: '+(old.unit||'')+' '+(old.system||''));
+       save();
+       renderPSR();
+       renderOps();
+       try{renderHome();}catch(e){}
+       toast('Sign-out deleted. <button onclick="undoDeleteSignOut()" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:4px;cursor:pointer;margin-left:6px;font-weight:600;">UNDO</button>','warning',10000);
+     }}]);
+}
+
+function undoDeleteSignOut(){
+  if(!S.archivedSignOuts||S.archivedSignOuts.length===0) return;
+  var so=S.archivedSignOuts.pop();
+  delete so._deletedAt;
+  
+  // Re-deduct bulk counts
+  if(so._isBulk&&so.items){
+    so.items.forEach(function(item){
+      var sec=S.sections.find(function(s){return s.binLocation===item.bin&&s.systemType===item.system;});
+      if(sec){
+        if(!sec._bulkSignedOut) sec._bulkSignedOut=0;
+        sec._bulkSignedOut+=item.count;
+      }
+    });
+  }
+  
+  if(!S.signedOut) S.signedOut=[];
+  S.signedOut.push(so);
+  save();
+  renderPSR();
+  renderOps();
+  try{renderHome();}catch(e){}
+  toast('Sign-out restored','success');
 }
 
 function addAbnOp(){
