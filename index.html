@@ -4635,9 +4635,7 @@ function renderPSR(){
   // ── Signed Out Chutes ──
   html+=`<div class="psr-section">
     <div class="psr-section-title">📋 Signed Out Chutes <button class="btn btn-sm btn-secondary" onclick="addSignedOut()" style="margin-left:8px;">+ Add</button></div>`;
-var activeSignedOut=(S.signedOut||[]).filter(function(s){
-  return (!s.status || s.status === 'out') && (s.unit || s.count || (s.scannedOut && s.scannedOut.length));
-});
+  var activeSignedOut=(S.signedOut||[]).filter(function(s){return s.status==='out';});
   if(activeSignedOut.length>0||totalSignedOut>0){
     html+=`<table class="psr-table"><thead><tr><th>Unit</th><th>System</th><th>Qty</th><th>Date</th><th></th></tr></thead><tbody>`;
     var soIdx=0;
