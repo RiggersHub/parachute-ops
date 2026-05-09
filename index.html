@@ -651,7 +651,7 @@ function getUnitStatusCats(){
   const unit=getUnits().find(u=>u.id===getActiveUnit());
   if(unit&&unit.config&&unit.config.statusCats&&unit.config.statusCats.length>0) return unit.config.statusCats;
   if(S.unitConfig&&S.unitConfig.statusCats&&S.unitConfig.statusCats.length>0) return S.unitConfig.statusCats;
-  return ['Popped','Maintenance'];
+  return ['Popped','Maintenance','MFF'];
 }
 function populateSystemDropdown(){
   const sel=document.getElementById('systemTypeSelect');
@@ -661,7 +661,7 @@ function populateSystemDropdown(){
   getUnitSystems().forEach(s=>{sel.innerHTML+='<option'+(s===val?' selected':'')+'>'+s+'</option>';});
 }
 
-let S = { sections:[], binLocations:[], knownPackers:[], knownIPs:[], masterInventory:{}, statusCounts:{}, equipmentCounts:{}, archive:{deletedRows:[],deletedSections:[],monthlyLogs:[]}, nextSectionId:1 };
+let S = { sections:[], binLocations:[], knownPackers:[], knownIPs:[], masterInventory:{}, statusCounts:{}, equipmentCounts:{}, mffData:{}, archive:{deletedRows:[],deletedSections:[],monthlyLogs:[]}, nextSectionId:1 };
 
 function getStorageKey(){ return 'pms_data_'+(localStorage.getItem('pms_activeUnit')||'default'); }
 function load(){
@@ -722,7 +722,11 @@ function load(){
   try{
     var units=JSON.parse(localStorage.getItem('pms_units')||'[]');
     units.forEach(function(u){
-      if(u.statusCats){u.statusCats=u.statusCats.map(function(c){return c==='Condemned'?'Out of Service':c;});}
+      if(u.statusCats){u.statusCats=u.statusCats.map(function(c){return c==='Condemned'?'Out of Service':c==='Expired'?'MFF':c;});}
+      if(u.config&&u.config.statusCats){
+        u.config.statusCats=u.config.statusCats.map(function(c){return c==='Condemned'?'Out of Service':c==='Expired'?'MFF':c;});
+        if(u.config.statusCats.indexOf('MFF')<0) u.config.statusCats.push('MFF');
+      }
     });
     localStorage.setItem('pms_units',JSON.stringify(units));
     // Also fix statusCounts keys
@@ -1432,6 +1436,7 @@ async function loadFromDB() {
       if(extra.capacityRA1) S.capacityRA1=extra.capacityRA1;
       if(extra.capacityRA1R) S.capacityRA1R=extra.capacityRA1R;
       if(extra.capacityRA1DBSL) S.capacityRA1DBSL=extra.capacityRA1DBSL;
+      if(extra.mffData) S.mffData=extra.mffData;
     }catch(e){}
   }
   
@@ -1616,7 +1621,8 @@ async function saveToDB() {
       capacityMC6: S.capacityMC6 || 0,
       capacityRA1: S.capacityRA1 || 0,
       capacityRA1R: S.capacityRA1R || 0,
-      capacityRA1DBSL: S.capacityRA1DBSL || 0
+      capacityRA1DBSL: S.capacityRA1DBSL || 0,
+      mffData: S.mffData || {}
     };
     await sbClient.from('pms_signed_out').delete().eq('unit_id', activeUnitId).eq('unit_name', '__state__');
     await sbClient.from('pms_signed_out').insert({
@@ -2291,6 +2297,88 @@ function renderAdmin(){
   renderAuditLog();
 }
 
+// ══════════════════════════════════════════════
+// MFF EQUIPMENT TRACKER
+// ══════════════════════════════════════════════
+const MFF_ITEMS = ['Altimeter','Cypress','Oxygen'];
+
+function openMFFDetail(itemKey){
+  if(!S.mffData) S.mffData={};
+  var d=S.mffData[itemKey]||{};
+  var label=itemKey.charAt(0).toUpperCase()+itemKey.slice(1);
+  var is='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:7px 10px;font-size:12px;font-family:inherit;outline:none;width:100%;box-sizing:border-box;';
+
+  var today=new Date().toISOString().split('T')[0];
+  var expClass='';
+  if(d.expiration){
+    var diff=(new Date(d.expiration+' 00:00:00')-new Date())/(1000*60*60*24);
+    expClass=diff<0?'color:var(--danger);font-weight:700;':diff<=30?'color:var(--warning);font-weight:700;':'color:var(--success);';
+  }
+
+  var html='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:4px;">';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px;">Date Calibrated</label>'
+    +'<input id="mff_calibrated" type="date" value="'+(d.calibrated||'')+'" style="'+is+'"></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px;">Expiration Date</label>'
+    +'<input id="mff_expiration" type="date" value="'+(d.expiration||'')+'" style="'+is+(d.expiration?expClass:'')+'"></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px;">In Service</label>'
+    +'<input id="mff_inservice" type="number" min="0" value="'+(d.inService||'')+'" placeholder="0" style="'+is+'"></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px;">In Maintenance</label>'
+    +'<input id="mff_maintenance" type="number" min="0" value="'+(d.maintenance||'')+'" placeholder="0" style="'+is+'"></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px;">Last Updated</label>'
+    +'<input id="mff_lastUpdated" type="date" value="'+(d.lastUpdated||today)+'" style="'+is+'"></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px;">Notes</label>'
+    +'<input id="mff_notes" type="text" value="'+esc(d.notes||'')+'" placeholder="Optional notes" style="'+is+'"></div>';
+  html+='</div>';
+
+  showConfirm(label+' — MFF Equipment',html,[
+    {label:'Cancel',cls:'btn-secondary',fn:function(){}},
+    {label:'Save',cls:'btn-primary',fn:function(){
+      S.mffData[itemKey]={
+        calibrated:document.getElementById('mff_calibrated').value,
+        expiration:document.getElementById('mff_expiration').value,
+        inService:parseInt(document.getElementById('mff_inservice').value)||0,
+        maintenance:parseInt(document.getElementById('mff_maintenance').value)||0,
+        lastUpdated:document.getElementById('mff_lastUpdated').value,
+        notes:document.getElementById('mff_notes').value.trim()
+      };
+      save(); renderUnifiedBar();
+      toast(label+' updated','success',2000);
+    }}
+  ]);
+}
+
+function renderMFFColumn(){
+  if(!S.mffData) S.mffData={};
+  var html='<div class="tracker-col"><div class="tracker-col-title">MFF</div><div class="tracker-cards">';
+  MFF_ITEMS.forEach(function(item){
+    var key=item.toLowerCase();
+    var d=S.mffData[key]||{};
+    var inSvc=d.inService||0;
+    var maint=d.maintenance||0;
+    var expLabel='—';
+    var expStyle='color:var(--text-muted);';
+    if(d.expiration){
+      var diff=(new Date(d.expiration+' 00:00:00')-new Date())/(1000*60*60*24);
+      expLabel=d.expiration;
+      expStyle=diff<0?'color:var(--danger);font-weight:700;':diff<=30?'color:var(--warning);font-weight:700;':diff<=90?'color:var(--success);font-weight:600;':'color:var(--text-muted);';
+    }
+    html+='<div style="background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin-bottom:6px;">';
+    html+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">';
+    html+='<span style="font-size:12px;font-weight:700;color:var(--text-primary);">'+item+'</span>';
+    html+='<button onclick="openMFFDetail(\''+key+'\')" style="background:var(--accent-dim);border:none;border-radius:4px;color:var(--accent);cursor:pointer;font-size:10px;padding:2px 8px;font-family:inherit;">Edit</button>';
+    html+='</div>';
+    html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:10px;">';
+    html+='<div><span style="color:var(--text-muted);">In Svc: </span><strong style="color:var(--success);">'+inSvc+'</strong></div>';
+    html+='<div><span style="color:var(--text-muted);">Maint: </span><strong style="color:var(--warning);">'+maint+'</strong></div>';
+    html+='<div style="grid-column:span 2;"><span style="color:var(--text-muted);">Cal: </span><span>'+(d.calibrated||'—')+'</span></div>';
+    html+='<div style="grid-column:span 2;"><span style="color:var(--text-muted);">Exp: </span><span style="'+expStyle+'">'+expLabel+'</span></div>';
+    html+='</div>';
+    html+='</div>';
+  });
+  html+='</div></div>';
+  return html;
+}
+
 function renderUnifiedBar(){
   var bar=document.getElementById('unifiedBar');
   if(!bar) return;
@@ -2331,6 +2419,8 @@ function renderUnifiedBar(){
     html+='</div>';
   });
   cats.forEach(function(cat){
+    if(cat==='Expired') return; // Replaced by MFF column
+    if(cat==='MFF'){ html+=renderMFFColumn(); return; }
     var catKey=cat.toLowerCase().replace(/\s+/g,'');
     var colContent='';
     var addedSystems=[];
