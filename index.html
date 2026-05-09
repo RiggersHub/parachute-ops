@@ -2816,14 +2816,24 @@ function setBulkCount(secId){
   var sec=S.sections.find(function(s){return s.id===secId;});
   if(!sec) return;
   var current=sec.bulkCount||0;
-  showConfirm('Set Packed Count','<div style="text-align:left;"><div style="font-size:12px;margin-bottom:8px;">Set a packed chute count for <strong>'+esc(sec.binLocation)+'</strong> ('+esc(sec.systemType)+') without entering serial numbers.</div><div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Current count: '+current+'</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><div><label style="font-size:10px;color:var(--text-muted);display:block;">Count</label><input type="number" id="bulkCountInput" min="0" value="'+current+'" placeholder="Qty" style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:8px;font-size:13px;width:100%;outline:none;"></div><div><label style="font-size:10px;color:var(--text-muted);display:block;">Pack Date</label><input type="date" id="bulkPackDate" value="'+(sec.bulkPackDate||new Date().toISOString().split("T")[0])+'" style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:8px;font-size:13px;width:100%;outline:none;"></div></div></div>',
+  var currentDate=sec.bulkPackDate||new Date().toISOString().split('T')[0];
+  var is='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:8px;font-size:13px;width:100%;outline:none;box-sizing:border-box;';
+  showConfirm('Set Packed Count',
+    '<div style="text-align:left;">'
+    +'<div style="font-size:12px;margin-bottom:8px;">Set a packed chute count for <strong>'+esc(sec.binLocation)+'</strong> ('+esc(sec.systemType)+') without entering serial numbers.</div>'
+    +'<div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">Current count: '+current+'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'
+    +'<div><label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px;">Count</label>'
+    +'<input type="number" id="bulkCountInput" min="0" value="'+current+'" placeholder="Qty" style="'+is+'"></div>'
+    +'<div><label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px;">Pack Date</label>'
+    +'<input type="date" id="bulkPackDate" value="'+currentDate+'" onclick="event.stopPropagation()" onchange="event.stopPropagation()" style="'+is+'"></div>'
+    +'</div></div>',
     [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
      {label:'Set Count',cls:'btn-primary',fn:function(){
        var val=parseInt(document.getElementById('bulkCountInput').value)||0;
        var packDate=document.getElementById('bulkPackDate').value||new Date().toISOString().split('T')[0];
        sec.bulkCount=val;
        sec.bulkPackDate=packDate;
-       // Calculate expiration based on system type
        var expDays=182;
        if(typeof CFG!=='undefined'&&CFG[sec.systemType]&&CFG[sec.systemType].expDays) expDays=CFG[sec.systemType].expDays;
        var expDate=new Date(packDate+'T00:00:00');
