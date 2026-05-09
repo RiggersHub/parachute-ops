@@ -1380,6 +1380,8 @@ async function loadFromDB() {
       maxChutes: sec.max_chutes,
       bulkCount: sec.bulk_count || 0,
       _bulkSignedOut: sec.bulk_signed_out || 0,
+      bulkPackDate: sec.bulk_pack_date || '',
+      bulkExpDate: sec.bulk_exp_date || '',
       rows: rows,
       createdAt: sec.created_at,
       _dbId: sec.id
@@ -1437,6 +1439,15 @@ async function loadFromDB() {
       if(extra.capacityRA1R) S.capacityRA1R=extra.capacityRA1R;
       if(extra.capacityRA1DBSL) S.capacityRA1DBSL=extra.capacityRA1DBSL;
       if(extra.mffData) S.mffData=extra.mffData;
+      // Restore bulk dates — covers both new DB columns and legacy fallback
+      if(extra.bulkDates){
+        S.sections.forEach(function(sec){
+          if(extra.bulkDates[sec.id]){
+            if(!sec.bulkPackDate) sec.bulkPackDate=extra.bulkDates[sec.id].packDate||'';
+            if(!sec.bulkExpDate)  sec.bulkExpDate=extra.bulkDates[sec.id].expDate||'';
+          }
+        });
+      }
     }catch(e){}
   }
   
@@ -1484,7 +1495,9 @@ async function saveToDB() {
         system_type: sec.systemType,
         max_chutes: sec.maxChutes,
         bulk_count: sec.bulkCount || 0,
-        bulk_signed_out: sec._bulkSignedOut || 0
+        bulk_signed_out: sec._bulkSignedOut || 0,
+        bulk_pack_date: sec.bulkPackDate || null,
+        bulk_exp_date: sec.bulkExpDate || null
       };
       
       if (sec._dbId && existingSecIds.includes(sec._dbId)) {
@@ -1622,7 +1635,11 @@ async function saveToDB() {
       capacityRA1: S.capacityRA1 || 0,
       capacityRA1R: S.capacityRA1R || 0,
       capacityRA1DBSL: S.capacityRA1DBSL || 0,
-      mffData: S.mffData || {}
+      mffData: S.mffData || {},
+      bulkDates: S.sections.reduce(function(acc,sec){
+        if(sec.bulkPackDate||sec.bulkExpDate) acc[sec.id]={packDate:sec.bulkPackDate||'',expDate:sec.bulkExpDate||''};
+        return acc;
+      }, {})
     };
     await sbClient.from('pms_signed_out').delete().eq('unit_id', activeUnitId).eq('unit_name', '__state__');
     await sbClient.from('pms_signed_out').insert({
