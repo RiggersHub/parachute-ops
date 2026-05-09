@@ -4570,8 +4570,6 @@ function renderPSR(){
   });
 
   // ── Summary Cards ──
-  html+=`<div class="psr-summary">
-    <div class="psr-stat"><div class="psr-stat-value">${totalChutes}</div><div class="psr-stat-label">Total Chutes Packed</div></div>`;
 
   // Count actual chutes accounted for per system family (packed + popped + maintenance + signed out)
   // Total capacity from equipment counts (configurable in PSR)
@@ -4636,48 +4634,54 @@ function renderPSR(){
 
   const inputStyle='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;font-weight:600;width:55px;text-align:center;outline:none;font-family:inherit;padding:3px;';
   const diffStyle=(d)=>`font-size:11px;font-weight:700;margin-top:2px;color:${d===0?'var(--success)':'var(--danger)'}`;
-  html+=`<div class="psr-stat" style="min-width:360px;">
-      <div class="psr-stat-value">${totalCap}</div>
-      <div class="psr-stat-label">Total Capacity</div>
-      <div style="display:flex;gap:8px;margin-top:10px;justify-content:center;flex-wrap:wrap;">
-        <div style="text-align:center;">
-          <div style="font-size:12px;font-weight:700;color:var(--text-primary);">${actualT11}</div>
-          <input type="number" value="${capT11||''}" placeholder="#" onchange="S.capacityT11=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
-          <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">T-11</div>
-          <div style="${diffStyle(diffT11)}">${diffT11<0?diffT11:diffT11===0?'✓':'+'+diffT11}</div>
-        </div>
-        <div style="text-align:center;">
-          <div style="font-size:12px;font-weight:700;color:var(--text-primary);">${actualT11R}</div>
-          <input type="number" value="${capT11R||''}" placeholder="#" onchange="S.capacityT11R=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
-          <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">T-11R</div>
-          <div style="${diffStyle(diffT11R)}">${diffT11R<0?diffT11R:diffT11R===0?'✓':'+'+diffT11R}</div>
-        </div>
-        <div style="text-align:center;">
-          <div style="font-size:12px;font-weight:700;color:var(--text-primary);">${actualMC6}</div>
-          <input type="number" value="${capMC6||''}" placeholder="#" onchange="S.capacityMC6=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
-          <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">MC-6</div>
-          <div style="${diffStyle(diffMC6)}">${diffMC6<0?diffMC6:diffMC6===0?'✓':'+'+diffMC6}</div>
-        </div>
-        <div style="text-align:center;">
-          <div style="font-size:12px;font-weight:700;color:var(--text-primary);">${actualRA1}</div>
-          <input type="number" value="${capRA1||''}" placeholder="#" onchange="S.capacityRA1=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
-          <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">RA-1</div>
-          <div style="${diffStyle(diffRA1)}">${diffRA1<0?diffRA1:diffRA1===0?'✓':'+'+diffRA1}</div>
-        </div>
-        <div style="text-align:center;">
-          <div style="font-size:12px;font-weight:700;color:var(--text-primary);">${actualRA1R}</div>
-          <input type="number" value="${capRA1R||''}" placeholder="#" onchange="S.capacityRA1R=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
-          <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">RA-1R</div>
-          <div style="${diffStyle(diffRA1R)}">${diffRA1R<0?diffRA1R:diffRA1R===0?'✓':'+'+diffRA1R}</div>
-        </div>
-        <div style="text-align:center;">
-          <div style="font-size:12px;font-weight:700;color:var(--text-primary);">${actualRA1DBSL}</div>
-          <input type="number" value="${capRA1DBSL||''}" placeholder="#" onchange="S.capacityRA1DBSL=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
-          <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">RA-1 DBSL</div>
-          <div style="${diffStyle(diffRA1DBSL)}">${diffRA1DBSL<0?diffRA1DBSL:diffRA1DBSL===0?'✓':'+'+diffRA1DBSL}</div>
-        </div>
+
+  // Total Capacity — full-width card on its own row
+  html+=`<div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:12px;text-align:center;">
+    <div style="font-size:28px;font-weight:700;color:var(--accent);">${totalCap}</div>
+    <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">Total Capacity</div>
+    <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
+      <div style="text-align:center;">
+        <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:2px;">${actualT11}</div>
+        <input type="number" value="${capT11||''}" placeholder="#" onchange="S.capacityT11=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
+        <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">T-11</div>
+        <div style="${diffStyle(diffT11)}">${diffT11<0?diffT11:diffT11===0?'✓':'+'+diffT11}</div>
+      </div>
+      <div style="text-align:center;">
+        <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:2px;">${actualT11R}</div>
+        <input type="number" value="${capT11R||''}" placeholder="#" onchange="S.capacityT11R=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
+        <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">T-11R</div>
+        <div style="${diffStyle(diffT11R)}">${diffT11R<0?diffT11R:diffT11R===0?'✓':'+'+diffT11R}</div>
+      </div>
+      <div style="text-align:center;">
+        <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:2px;">${actualMC6}</div>
+        <input type="number" value="${capMC6||''}" placeholder="#" onchange="S.capacityMC6=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
+        <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">MC-6</div>
+        <div style="${diffStyle(diffMC6)}">${diffMC6<0?diffMC6:diffMC6===0?'✓':'+'+diffMC6}</div>
+      </div>
+      <div style="text-align:center;">
+        <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:2px;">${actualRA1}</div>
+        <input type="number" value="${capRA1||''}" placeholder="#" onchange="S.capacityRA1=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
+        <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">RA-1</div>
+        <div style="${diffStyle(diffRA1)}">${diffRA1<0?diffRA1:diffRA1===0?'✓':'+'+diffRA1}</div>
+      </div>
+      <div style="text-align:center;">
+        <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:2px;">${actualRA1R}</div>
+        <input type="number" value="${capRA1R||''}" placeholder="#" onchange="S.capacityRA1R=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
+        <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">RA-1R</div>
+        <div style="${diffStyle(diffRA1R)}">${diffRA1R<0?diffRA1R:diffRA1R===0?'✓':'+'+diffRA1R}</div>
+      </div>
+      <div style="text-align:center;">
+        <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:2px;">${actualRA1DBSL}</div>
+        <input type="number" value="${capRA1DBSL||''}" placeholder="#" onchange="S.capacityRA1DBSL=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
+        <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">RA-1 DBSL</div>
+        <div style="${diffStyle(diffRA1DBSL)}">${diffRA1DBSL<0?diffRA1DBSL:diffRA1DBSL===0?'✓':'+'+diffRA1DBSL}</div>
       </div>
     </div>
+  </div>`;
+
+  // Remaining stat cards in their own grid row
+  html+=`<div class="psr-summary">
+    <div class="psr-stat"><div class="psr-stat-value">${totalChutes}</div><div class="psr-stat-label">Total Chutes Packed</div></div>
     <div class="psr-stat warning"><div class="psr-stat-value">${totalPopped}</div><div class="psr-stat-label">Total Popped</div></div>
     <div class="psr-stat ${expiring7>0?'danger':'success'}"><div class="psr-stat-value">${expiring7}</div><div class="psr-stat-label">Expiring ≤ 7 Days</div></div>
     <div class="psr-stat ${expiring30>0?'warning':'success'}"><div class="psr-stat-value">${expiring30}</div><div class="psr-stat-label">Expiring ≤ 30 Days</div></div>
@@ -4689,11 +4693,10 @@ function renderPSR(){
   html+=`<div class="psr-section">
     <div class="psr-section-title">📋 Signed Out Chutes <button class="btn btn-sm btn-secondary" onclick="addSignedOut()" style="margin-left:8px;">+ Add</button></div>`;
   var activeSignedOut=(S.signedOut||[]).filter(function(s){return s.status==='out';});
-  if(activeSignedOut.length>0||totalSignedOut>0){
+  if(activeSignedOut.length>0){
     html+=`<table class="psr-table"><thead><tr><th>Unit</th><th>System</th><th>Qty</th><th>Date</th><th></th></tr></thead><tbody>`;
-    var soIdx=0;
     (S.signedOut||[]).forEach(function(so,i){
-      if(so.status!=='out'&&so.status) return;
+      if(so.status!=='out') return;
       var systems=getUnitSystems();
       var sysOpts='<option value="">-- Type --</option>';
       systems.forEach(function(sys){ sysOpts+='<option value="'+sys+'"'+(so.system===sys?' selected':'')+'>'+sys+'</option>'; });
@@ -4995,7 +4998,7 @@ function createSnapshot(label){
     (S.statusCounts[sys]?.popped||[]).forEach(e=>totalPopped+=(parseInt(e.count)||0));
     (S.statusCounts[sys]?.maintenance||[]).forEach(e=>totalMaint+=(parseInt(e.count)||0));
   });
-  (S.signedOut||[]).filter(function(s){return (s.status==='out'||!s.status)&&!s._requestId;}).forEach(s=>totalSignedOut+=(parseInt(s.count)||0));
+  (S.signedOut||[]).filter(function(s){return s.status==='out'&&!s._requestId;}).forEach(s=>totalSignedOut+=(parseInt(s.count)||0));
 
   const sectionData=S.sections.map(sec=>({
     binLocation:sec.binLocation, systemType:sec.systemType, maxChutes:sec.maxChutes,
@@ -5199,7 +5202,7 @@ function printPSR(){
   });
 
   let totalSignedOut=0;
-  (S.signedOut||[]).filter(function(s){return (s.status==='out'||!s.status)&&!s._requestId;}).forEach(s=>totalSignedOut+=(parseInt(s.count)||0));
+  (S.signedOut||[]).filter(function(s){return s.status==='out'&&!s._requestId;}).forEach(s=>totalSignedOut+=(parseInt(s.count)||0));
 
   // Capacity
   // Total capacity from equipment counts (configurable in PSR)
@@ -5426,7 +5429,7 @@ function renderWeekly(){
 
   // Signed out total (current, rolls over)
   let totalSignedOut=0;
-  (S.signedOut||[]).filter(function(s){return (s.status==='out'||!s.status)&&!s._requestId;}).forEach(s=>totalSignedOut+=(parseInt(s.count)||0));
+  (S.signedOut||[]).filter(function(s){return s.status==='out'&&!s._requestId;}).forEach(s=>totalSignedOut+=(parseInt(s.count)||0));
 
   // Build weeks — current week + past 11 weeks (12 total)
   const weeks=[];
