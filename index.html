@@ -564,6 +564,7 @@
         <option value="MC-6">MC-6</option>
         <option value="RA-1">RA-1</option>
         <option value="RA-1R">RA-1R</option>
+        <option value="RA-1 DBSL">RA-1 DBSL</option>
       </select>
       <button class="btn btn-secondary btn-sm" onclick="bulkSetSystemType()">Apply to Selected</button>
       <button class="btn btn-secondary btn-sm" onclick="selectAllInventory()">Select All</button>
@@ -635,10 +636,11 @@ const CFG = {
   'MC-6':{ maxBin:72, expDays:182 }, 'T-11':{ maxBin:56, expDays:182 },
   'T-11R':{ maxBin:140, expDays:365 }, 'T-11R SP':{ maxBin:140, expDays:365 },
   'RA-1':{ maxBin:30, expDays:180 }, 'RA-1R':{ maxBin:30, expDays:180 },
+  'RA-1 DBSL':{ maxBin:30, expDays:180 },
 };
-const STATUS_SYS = ['T-11','T-11R/SP','MC-6','RA-1','RA-1R'];
+const STATUS_SYS = ['T-11','T-11R/SP','MC-6','RA-1','RA-1R','RA-1 DBSL'];
 
-const DEFAULT_SYSTEMS=['T-11','T-11R','T-11R SP','MC-6','RA-1','RA-1R'];
+const DEFAULT_SYSTEMS=['T-11','T-11R','T-11R SP','MC-6','RA-1','RA-1R','RA-1 DBSL'];
 function getUnitSystems(){
   const unit=getUnits().find(u=>u.id===getActiveUnit());
   if(unit&&unit.config&&unit.config.systems&&unit.config.systems.length>0) return unit.config.systems;
@@ -1419,8 +1421,11 @@ async function loadFromDB() {
       if(extra.archivedRequests) S.archivedRequests=extra.archivedRequests;
       if(extra.archivedSignOuts) S.archivedSignOuts=extra.archivedSignOuts;
       if(extra.capacityT11) S.capacityT11=extra.capacityT11;
+      if(extra.capacityT11R) S.capacityT11R=extra.capacityT11R;
       if(extra.capacityMC6) S.capacityMC6=extra.capacityMC6;
       if(extra.capacityRA1) S.capacityRA1=extra.capacityRA1;
+      if(extra.capacityRA1R) S.capacityRA1R=extra.capacityRA1R;
+      if(extra.capacityRA1DBSL) S.capacityRA1DBSL=extra.capacityRA1DBSL;
     }catch(e){}
   }
   
@@ -1596,8 +1601,11 @@ async function saveToDB() {
       archivedRequests: S.archivedRequests || [],
       archivedSignOuts: S.archivedSignOuts || [],
       capacityT11: S.capacityT11 || 0,
+      capacityT11R: S.capacityT11R || 0,
       capacityMC6: S.capacityMC6 || 0,
-      capacityRA1: S.capacityRA1 || 0
+      capacityRA1: S.capacityRA1 || 0,
+      capacityRA1R: S.capacityRA1R || 0,
+      capacityRA1DBSL: S.capacityRA1DBSL || 0
     };
     await sbClient.from('pms_signed_out').delete().eq('unit_id', activeUnitId).eq('unit_name', '__state__');
     await sbClient.from('pms_signed_out').insert({
@@ -2499,7 +2507,7 @@ document.getElementById('unifiedBar')?.addEventListener('change',function(e){
   if(!S.statusCounts[sys][cat]) S.statusCounts[sys][cat]=[{bin:'',count:''}];
   if(!S.statusCounts[sys][cat][idx]) return;
   S.statusCounts[sys][cat][idx][inp.dataset.fld]=inp.dataset.fld==='count'?(parseInt(inp.value)||''):inp.value;
-  save(); renderUnifiedBar();
+  save(); // Do NOT call renderUnifiedBar() here — it would destroy the input mid-typing
 });
 
 document.getElementById('btnAddSection').addEventListener('click',()=>{
@@ -2897,11 +2905,12 @@ function onIP(secId,ri,val,el){
 }
 
 // Auto-decrement popped when a row becomes fully packed (has S/N + packer)
+// NOTE: Auto-decrement is intentionally disabled - subtract from popped manually via Status Bar
 function checkAutoDecrement(sec,row,wasPacked){
   const isPacked=!!(row.serialNumber && row.packer);
   if(isPacked && !wasPacked){
     row._packed=true;
-    decrementPopped(sec.systemType);
+    // Do NOT auto-subtract from popped bin - user controls this manually
   }
 }
 
@@ -4555,21 +4564,27 @@ function renderPSR(){
   // Signed out totals
   if(!S.signedOut) S.signedOut=[];
   let totalSignedOut=0;
-  (S.signedOut||[]).filter(function(s){return s.status==='out';}).forEach(function(s){totalSignedOut+=((s.scannedOut||[]).length)||(parseInt(s.count)||0);});
+  (S.signedOut||[]).filter(function(s){return s.status==='out';}).forEach(function(s){
+    var scanned=(s.scannedOut||[]).length;
+    totalSignedOut+=scanned>0?scanned:(parseInt(s.count)||0);
+  });
 
   // ── Summary Cards ──
   html+=`<div class="psr-summary">
     <div class="psr-stat"><div class="psr-stat-value">${totalChutes}</div><div class="psr-stat-label">Total Chutes Packed</div></div>`;
 
   // Count actual chutes accounted for per system family (packed + popped + maintenance + signed out)
-  // T-11 family = T-11 + T-11R + T-11R SP
   // Total capacity from equipment counts (configurable in PSR)
   var ec=S.equipmentCounts||{};
-  let actualT11=0, actualMC6=0, actualRA1=0;
+  let actualT11=0, actualT11R=0, actualMC6=0, actualRA1=0, actualRA1R=0, actualRA1DBSL=0;
   // Use auth (authorized) as total capacity if set
   if(ec['T-11']&&ec['T-11'].auth) actualT11=parseInt(ec['T-11'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='T-11'||sec.systemType==='T-11R'||sec.systemType==='T-11R SP') actualT11+=sec.rows.length+(parseInt(sec.bulkCount)||0);
+    if(sec.systemType==='T-11') actualT11+=sec.rows.length+(parseInt(sec.bulkCount)||0);
+  });
+  if(ec['T-11R']&&ec['T-11R'].auth) actualT11R=parseInt(ec['T-11R'].auth)||0;
+  else S.sections.forEach(sec=>{
+    if(sec.systemType==='T-11R'||sec.systemType==='T-11R SP') actualT11R+=sec.rows.length+(parseInt(sec.bulkCount)||0);
   });
   if(ec['MC-6']&&ec['MC-6'].auth) actualMC6=parseInt(ec['MC-6'].auth)||0;
   else S.sections.forEach(sec=>{
@@ -4577,39 +4592,65 @@ function renderPSR(){
   });
   if(ec['RA-1']&&ec['RA-1'].auth) actualRA1=parseInt(ec['RA-1'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='RA-1'||sec.systemType==='RA-1R') actualRA1+=sec.rows.length+(parseInt(sec.bulkCount)||0);
+    if(sec.systemType==='RA-1') actualRA1+=sec.rows.length+(parseInt(sec.bulkCount)||0);
   });
-  // Add popped + maintenance
-  ['T-11','T-11R/SP'].forEach(sys=>{
+  if(ec['RA-1R']&&ec['RA-1R'].auth) actualRA1R=parseInt(ec['RA-1R'].auth)||0;
+  else S.sections.forEach(sec=>{
+    if(sec.systemType==='RA-1R') actualRA1R+=sec.rows.length+(parseInt(sec.bulkCount)||0);
+  });
+  if(ec['RA-1 DBSL']&&ec['RA-1 DBSL'].auth) actualRA1DBSL=parseInt(ec['RA-1 DBSL'].auth)||0;
+  else S.sections.forEach(sec=>{
+    if(sec.systemType==='RA-1 DBSL') actualRA1DBSL+=sec.rows.length+(parseInt(sec.bulkCount)||0);
+  });
+  // Add popped + maintenance per system
+  ['T-11'].forEach(sys=>{
     (S.statusCounts[sys]?.popped||[]).forEach(e=>actualT11+=(parseInt(e.count)||0));
     (S.statusCounts[sys]?.maintenance||[]).forEach(e=>actualT11+=(parseInt(e.count)||0));
+  });
+  ['T-11R/SP'].forEach(sys=>{
+    (S.statusCounts[sys]?.popped||[]).forEach(e=>actualT11R+=(parseInt(e.count)||0));
+    (S.statusCounts[sys]?.maintenance||[]).forEach(e=>actualT11R+=(parseInt(e.count)||0));
   });
   ['MC-6'].forEach(sys=>{
     (S.statusCounts[sys]?.popped||[]).forEach(e=>actualMC6+=(parseInt(e.count)||0));
     (S.statusCounts[sys]?.maintenance||[]).forEach(e=>actualMC6+=(parseInt(e.count)||0));
   });
-  ['RA-1','RA-1R'].forEach(sys=>{
+  ['RA-1'].forEach(sys=>{
     (S.statusCounts[sys]?.popped||[]).forEach(e=>actualRA1+=(parseInt(e.count)||0));
     (S.statusCounts[sys]?.maintenance||[]).forEach(e=>actualRA1+=(parseInt(e.count)||0));
   });
+  ['RA-1R'].forEach(sys=>{
+    (S.statusCounts[sys]?.popped||[]).forEach(e=>actualRA1R+=(parseInt(e.count)||0));
+    (S.statusCounts[sys]?.maintenance||[]).forEach(e=>actualRA1R+=(parseInt(e.count)||0));
+  });
+  ['RA-1 DBSL'].forEach(sys=>{
+    (S.statusCounts[sys]?.popped||[]).forEach(e=>actualRA1DBSL+=(parseInt(e.count)||0));
+    (S.statusCounts[sys]?.maintenance||[]).forEach(e=>actualRA1DBSL+=(parseInt(e.count)||0));
+  });
 
-  const capT11=S.capacityT11||0, capMC6=S.capacityMC6||0, capRA1=S.capacityRA1||0;
-  const totalCap=capT11+capMC6+capRA1;
-  const totalActual=actualT11+actualMC6+actualRA1;
-  const diffT11=actualT11-capT11, diffMC6=actualMC6-capMC6, diffRA1=actualRA1-capRA1;
+  const capT11=S.capacityT11||0, capT11R=S.capacityT11R||0, capMC6=S.capacityMC6||0, capRA1=S.capacityRA1||0, capRA1R=S.capacityRA1R||0, capRA1DBSL=S.capacityRA1DBSL||0;
+  const totalCap=capT11+capT11R+capMC6+capRA1+capRA1R+capRA1DBSL;
+  const totalActual=actualT11+actualT11R+actualMC6+actualRA1+actualRA1R+actualRA1DBSL;
+  const diffT11=actualT11-capT11, diffT11R=actualT11R-capT11R, diffMC6=actualMC6-capMC6, diffRA1=actualRA1-capRA1, diffRA1R=actualRA1R-capRA1R, diffRA1DBSL=actualRA1DBSL-capRA1DBSL;
   const totalDiff=totalActual-totalCap;
 
   const inputStyle='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;font-weight:600;width:55px;text-align:center;outline:none;font-family:inherit;padding:3px;';
   const diffStyle=(d)=>`font-size:11px;font-weight:700;margin-top:2px;color:${d===0?'var(--success)':'var(--danger)'}`;
-  html+=`<div class="psr-stat" style="min-width:220px;">
+  html+=`<div class="psr-stat" style="min-width:360px;">
       <div class="psr-stat-value">${totalCap}</div>
       <div class="psr-stat-label">Total Capacity</div>
-      <div style="display:flex;gap:8px;margin-top:10px;justify-content:center;">
+      <div style="display:flex;gap:8px;margin-top:10px;justify-content:center;flex-wrap:wrap;">
         <div style="text-align:center;">
           <div style="font-size:12px;font-weight:700;color:var(--text-primary);">${actualT11}</div>
           <input type="number" value="${capT11||''}" placeholder="#" onchange="S.capacityT11=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
           <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">T-11</div>
           <div style="${diffStyle(diffT11)}">${diffT11<0?diffT11:diffT11===0?'✓':'+'+diffT11}</div>
+        </div>
+        <div style="text-align:center;">
+          <div style="font-size:12px;font-weight:700;color:var(--text-primary);">${actualT11R}</div>
+          <input type="number" value="${capT11R||''}" placeholder="#" onchange="S.capacityT11R=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
+          <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">T-11R</div>
+          <div style="${diffStyle(diffT11R)}">${diffT11R<0?diffT11R:diffT11R===0?'✓':'+'+diffT11R}</div>
         </div>
         <div style="text-align:center;">
           <div style="font-size:12px;font-weight:700;color:var(--text-primary);">${actualMC6}</div>
@@ -4622,6 +4663,18 @@ function renderPSR(){
           <input type="number" value="${capRA1||''}" placeholder="#" onchange="S.capacityRA1=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
           <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">RA-1</div>
           <div style="${diffStyle(diffRA1)}">${diffRA1<0?diffRA1:diffRA1===0?'✓':'+'+diffRA1}</div>
+        </div>
+        <div style="text-align:center;">
+          <div style="font-size:12px;font-weight:700;color:var(--text-primary);">${actualRA1R}</div>
+          <input type="number" value="${capRA1R||''}" placeholder="#" onchange="S.capacityRA1R=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
+          <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">RA-1R</div>
+          <div style="${diffStyle(diffRA1R)}">${diffRA1R<0?diffRA1R:diffRA1R===0?'✓':'+'+diffRA1R}</div>
+        </div>
+        <div style="text-align:center;">
+          <div style="font-size:12px;font-weight:700;color:var(--text-primary);">${actualRA1DBSL}</div>
+          <input type="number" value="${capRA1DBSL||''}" placeholder="#" onchange="S.capacityRA1DBSL=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
+          <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">RA-1 DBSL</div>
+          <div style="${diffStyle(diffRA1DBSL)}">${diffRA1DBSL<0?diffRA1DBSL:diffRA1DBSL===0?'✓':'+'+diffRA1DBSL}</div>
         </div>
       </div>
     </div>
@@ -4703,7 +4756,7 @@ function renderPSR(){
     html+=`<table class="psr-table" style="margin-bottom:16px;"><thead><tr><th>Operation</th><th>System</th><th>Date</th><th>Requested</th><th></th></tr></thead><tbody>`;
     S.abnOps.forEach((op,i)=>{
       let sysOpts='<option value="">--</option>';
-      ['T-11','T-11R','T-11R SP','MC-6','RA-1','RA-1R'].forEach(s=>{
+      ['T-11','T-11R','T-11R SP','MC-6','RA-1','RA-1R','RA-1 DBSL'].forEach(s=>{
         sysOpts+=`<option value="${s}" ${op.system===s?'selected':''}>${s}</option>`;
       });
       html+=`<tr>
@@ -4726,7 +4779,7 @@ function renderPSR(){
 
   // Availability Calculation
   // Per-system availability
-  var sysList=['T-11','MC-6','RA-1'];
+  var sysList=['T-11','T-11R','MC-6','RA-1','RA-1R','RA-1 DBSL'];
   var sysAvail={};
   var nowDate=new Date();
   var curMonth=nowDate.getMonth();
@@ -4734,7 +4787,9 @@ function renderPSR(){
   sysList.forEach(function(sys){
     var packed=0,expiringThisMonth=0,signedOut=0,requested=0;
     S.sections.forEach(function(sec){
-      if(sec.systemType!==sys) return;
+      // T-11R bucket: T-11R and T-11R SP
+      var match=(sys==='T-11R')?(sec.systemType==='T-11R'||sec.systemType==='T-11R SP'):(sec.systemType===sys);
+      if(!match) return;
       packed+=Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
       sec.rows.forEach(function(r){
         if(r.serialNumber&&r.packer&&r.ip&&!r._signedOut&&!r._popped) packed++;
@@ -4750,13 +4805,16 @@ function renderPSR(){
       }
     });
     (S.signedOut||[]).forEach(function(so){
-      if(!so._requestId&&(so.system===sys||(so.system||'').includes(sys))){
-        signedOut+=parseInt(so.count)||0;
+      if(!so._requestId){
+        var soSys=(so.system||'').trim();
+        var sysMatch=(sys==='T-11R')?(soSys==='T-11R'||soSys==='T-11R SP'):(soSys===sys||soSys.includes(sys));
+        if(sysMatch) signedOut+=parseInt(so.count)||0;
       }
     });
     (S.abnOps||[]).forEach(function(op){
       var opSys=(op.system||'').trim();
-      if(opSys===sys) requested+=parseInt(op.requested)||0;
+      var sysMatch=(sys==='T-11R')?(opSys==='T-11R'||opSys==='T-11R SP'):(opSys===sys);
+      if(sysMatch) requested+=parseInt(op.requested)||0;
     });
     sysAvail[sys]={packed:packed,expiring:expiringThisMonth,signedOut:signedOut,requested:requested,
       available:packed-requested-signedOut-expiringThisMonth};
@@ -8006,10 +8064,11 @@ function buildRequestCard(req,ridx){
   return h;
 }
 
-function newParaRequest(){
+function newParaRequest(prefill){
+  prefill=prefill||null;
   var units=['294th','143rd','19th Group','Other'];
   var aircraft=['C130J','C130H','C17','CH47','UH60','Other'];
-  var paraTypes=['T-11 Main','MC-6 Main','T-11R Reserve','RA-1','RA-1R','Other'];
+  var paraTypes=['T-11 Main','MC-6 Main','T-11R Reserve','RA-1','RA-1R','RA-1 DBSL','Other'];
   var vehicles=['Box Truck','LMTV','FMTV','5-Ton','Trailer','POV','Other'];
   var airdrops=['None','CDS','Heavy Drop','Door Bundle','Other'];
   var slingloads=['None','Internal','External','Both'];
@@ -8043,12 +8102,17 @@ function newParaRequest(){
   
   // Aircraft Info
   html+='<div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:4px;">AIRCRAFT INFO</div>';
+  html+='<div id="aircraftLines" style="margin-bottom:6px;">';
+  html+='<div class="aircraft-req-line" style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-bottom:6px;padding:8px;border:1px solid var(--border);border-radius:6px;">';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Aircraft Type*</label><select class="rqAircraftType" style="'+is+'">'+opts(aircraft)+'</select></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Quantity*</label><input class="rqAircraftQty" type="number" min="0" placeholder="Qty" style="'+is+'"></div>';
+  html+='<div style="display:flex;align-items:end;"><span style="width:24px;"></span></div>';
+  html+='</div></div>';
+  html+='<div style="margin-bottom:12px;"><button type="button" onclick="addAircraftLine()" style="background:none;border:1px dashed var(--border);border-radius:4px;color:var(--accent);cursor:pointer;font-size:11px;padding:4px 12px;margin-bottom:8px;">+ Add Aircraft</button></div>';
   html+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;">';
-  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Aircraft Type*</label><select id="rqAircraft" style="'+is+'">'+opts(aircraft)+'</select></div>';
-  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Quantity*</label><input id="rqAircraftQty" type="number" min="0" placeholder="Qty" style="'+is+'"></div>';
   html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">In Trail?</label><select id="rqInTrail" style="'+is+'"><option value="No">No</option><option value="Yes">Yes</option></select></div>';
   html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">MALC (Donut)?</label><select id="rqMALC" style="'+is+'"><option value="No">No</option><option value="Yes">Yes</option></select></div>';
-  html+='<div style="grid-column:span 2;"><label style="font-size:10px;color:var(--text-muted);display:block;">Other Equipment</label><input id="rqOtherEquip" style="'+is+'" placeholder="Additional equipment needed"></div>';
+  html+='<div style="grid-column:span 1;"><label style="font-size:10px;color:var(--text-muted);display:block;">Other Equipment</label><input id="rqOtherEquip" style="'+is+'" placeholder="Additional equipment needed"></div>';
   html+='</div>';
   
   // Parachute Info
@@ -8075,13 +8139,18 @@ function newParaRequest(){
   
   // Airdrop Info
   html+='<div style="font-size:13px;font-weight:700;color:var(--accent);margin-bottom:8px;border-bottom:1px solid var(--border);padding-bottom:4px;">AIRDROP (if applicable)</div>';
+  html+='<div id="airdropLines" style="margin-bottom:6px;">';
+  html+='<div class="airdrop-req-line" style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-bottom:6px;padding:8px;border:1px solid var(--border);border-radius:6px;">';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Airdrop Type</label><select class="rqAirdropType" style="'+is+'">'+opts(airdrops)+'</select></div>';
+  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Quantity</label><input class="rqAirdropQty" type="number" min="0" placeholder="Qty" style="'+is+'"></div>';
+  html+='<div style="display:flex;align-items:end;"><span style="width:24px;"></span></div>';
+  html+='</div></div>';
+  html+='<div style="margin-bottom:8px;"><button type="button" onclick="addAirdropLine()" style="background:none;border:1px dashed var(--border);border-radius:4px;color:var(--accent);cursor:pointer;font-size:11px;padding:4px 12px;">+ Add Airdrop Type</button></div>';
   html+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:12px;">';
-  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Airdrop Type</label><select id="rqAirdropType" style="'+is+'">'+opts(airdrops)+'</select></div>';
-  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Quantity</label><input id="rqAirdropQty" type="number" min="0" placeholder="Qty" style="'+is+'"></div>';
   html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">MRE?</label><select id="rqMRE" style="'+is+'"><option value="No">No</option><option value="Yes">Yes</option></select></div>';
   html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Water Type</label><select id="rqWater" style="'+is+'">'+opts(waterTypes)+'</select></div>';
   html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Ammo Type</label><select id="rqAmmo" style="'+is+'">'+opts(ammoTypes)+'</select></div>';
-  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Notes</label><input id="rqAirdropNotes" style="'+is+'" placeholder="Airdrop notes"></div>';
+  html+='<div style="grid-column:span 3;"><label style="font-size:10px;color:var(--text-muted);display:block;">Notes</label><input id="rqAirdropNotes" style="'+is+'" placeholder="Airdrop notes"></div>';
   html+='</div>';
   
   // Slingload Info
@@ -8118,6 +8187,67 @@ function newParaRequest(){
   dialog.innerHTML='<div class="confirm-title">New Parachute Request</div><div class="confirm-message">'+html+'</div><div class="confirm-actions"><button class="btn btn-secondary" id="rqCancelBtn">Cancel</button><button class="btn btn-primary" id="rqSubmitBtn">Submit Request</button></div>';
   overlay.appendChild(dialog);
   document.body.appendChild(overlay);
+  
+  // Restore prefill data if coming back from confirmation
+  if(prefill){
+    try{
+      var unitSel=document.getElementById('rqUnit');
+      if(unitSel){
+        var unitMatch=(['294th','143rd','19th Group'].indexOf(prefill.unit)>=0)?prefill.unit:'Other';
+        unitSel.value=unitMatch;
+        if(unitMatch==='Other'){var ou=document.getElementById('rqUnitOther');if(ou)ou.value=prefill.unit;}
+      }
+      var fields={rqPOCName:'pocName',rqPOCEmail:'pocEmail',rqPOCPhone:'pocPhone',rqOpFrom:'opFrom',rqOpTo:'opTo',rqAirfield:'airfield',rqDZ:'dz',rqInTrail:'inTrail',rqMALC:'malc',rqOtherEquip:'otherEquip',rqReserves:'reserves',rqAEBP:'aebp',rqMAWC:'mawc',rqMAWCL:'mawcl',rqPickup:'pickupDate',rqReturn:'returnDate',rqVehicle:'vehicleType',rqPickupPOC:'pickupPOC',rqPickupPhone:'pickupPhone',rqMRE:'mre',rqWater:'waterType',rqAmmo:'ammoType',rqAirdropNotes:'airdropNotes',rqSlingType:'slingType',rqSlingQty:'slingQty',rqSlingEquip:'slingEquip',rqSlingAircraft:'slingAircraft',rqSlingAircraftQty:'slingAircraftQty',rqAircraftPOC:'aircraftPOC',rqAircraftPOCPhone:'aircraftPOCPhone',rqSpecialTraining:'specialTraining',rqRemarks:'remarks'};
+      Object.keys(fields).forEach(function(id){var el=document.getElementById(id);if(el&&prefill[fields[id]]!=null)el.value=prefill[fields[id]];});
+      // Restore para lines
+      if(prefill.paraLines&&prefill.paraLines.length>0){
+        var plc=document.getElementById('paraRequestLines');
+        if(plc){
+          plc.innerHTML='';
+          var ptypes=['T-11 Main','MC-6 Main','T-11R Reserve','RA-1','RA-1R','RA-1 DBSL','Other'];
+          var pis='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:6px 10px;font-size:12px;font-family:inherit;outline:none;width:100%;';
+          prefill.paraLines.forEach(function(pl){
+            var d=document.createElement('div');d.className='para-req-line';d.style.cssText='display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-bottom:6px;padding:8px;border:1px solid var(--border);border-radius:6px;';
+            var popts=ptypes.map(function(t){return '<option value="'+t+'"'+(t===pl.type?' selected':'')+'>'+t+'</option>';}).join('');
+            d.innerHTML='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Type</label><select class="rqParaType" style="'+pis+'">'+popts+'</select></div><div><label style="font-size:10px;color:var(--text-muted);display:block;">Qty</label><input class="rqParaQty" type="number" min="1" value="'+esc(pl.qty||'')+'" placeholder="Qty" style="'+pis+'"></div><div style="display:flex;align-items:end;"><button onclick="this.parentElement.parentElement.remove()" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px;padding:6px;">\u2715</button></div>';
+            plc.appendChild(d);
+          });
+        }
+      }
+      // Restore aircraft lines
+      if(prefill.aircraftLines&&prefill.aircraftLines.length>0){
+        var alc=document.getElementById('aircraftLines');
+        if(alc){
+          alc.innerHTML='';
+          var atypes=['C130J','C130H','C17','CH47','UH60','Other'];
+          var ais='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:6px 10px;font-size:12px;font-family:inherit;outline:none;width:100%;';
+          prefill.aircraftLines.forEach(function(al,idx){
+            var d=document.createElement('div');d.className='aircraft-req-line';d.style.cssText='display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-bottom:6px;padding:8px;border:1px solid var(--border);border-radius:6px;';
+            var aopts=atypes.map(function(t){return '<option value="'+t+'"'+(t===al.type?' selected':'')+'>'+t+'</option>';}).join('');
+            var removeBtn=idx>0?'<button onclick="this.parentElement.parentElement.remove()" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px;padding:6px;">\u2715</button>':'<span style="width:24px;"></span>';
+            d.innerHTML='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Aircraft Type</label><select class="rqAircraftType" style="'+ais+'">'+aopts+'</select></div><div><label style="font-size:10px;color:var(--text-muted);display:block;">Quantity</label><input class="rqAircraftQty" type="number" min="0" value="'+esc(al.qty||'')+'" placeholder="Qty" style="'+ais+'"></div><div style="display:flex;align-items:end;">'+removeBtn+'</div>';
+            alc.appendChild(d);
+          });
+        }
+      }
+      // Restore airdrop lines
+      if(prefill.airdropLines&&prefill.airdropLines.length>0){
+        var adlc=document.getElementById('airdropLines');
+        if(adlc){
+          adlc.innerHTML='';
+          var adtypes=['None','CDS','Heavy Drop','Door Bundle','Other'];
+          var adis='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:6px 10px;font-size:12px;font-family:inherit;outline:none;width:100%;';
+          prefill.airdropLines.forEach(function(ad,idx){
+            var d=document.createElement('div');d.className='airdrop-req-line';d.style.cssText='display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-bottom:6px;padding:8px;border:1px solid var(--border);border-radius:6px;';
+            var adopts=adtypes.map(function(t){return '<option value="'+t+'"'+(t===ad.type?' selected':'')+'>'+t+'</option>';}).join('');
+            var removeBtn=idx>0?'<button onclick="this.parentElement.parentElement.remove()" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px;padding:6px;">\u2715</button>':'<span style="width:24px;"></span>';
+            d.innerHTML='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Airdrop Type</label><select class="rqAirdropType" style="'+adis+'">'+adopts+'</select></div><div><label style="font-size:10px;color:var(--text-muted);display:block;">Quantity</label><input class="rqAirdropQty" type="number" min="0" value="'+esc(ad.qty||'')+'" placeholder="Qty" style="'+adis+'"></div><div style="display:flex;align-items:end;">'+removeBtn+'</div>';
+            adlc.appendChild(d);
+          });
+        }
+      }
+    }catch(e){console.log('Prefill error:',e.message);}
+  }
   document.getElementById('rqCancelBtn').addEventListener('click',function(){overlay.remove();});
   document.getElementById('rqSubmitBtn').addEventListener('click',function(){
     var pn=((document.getElementById('rqPOCName')||{}).value||'').trim();
@@ -8134,6 +8264,18 @@ function newParaRequest(){
     var paraSum=[];
     lines.forEach(function(el){var t=el.querySelector('.rqParaType');var q=el.querySelector('.rqParaQty');if(t&&q&&q.value)paraSum.push(t.value+' x'+q.value);});
     
+    // Collect aircraft lines
+    var aircraftLines=document.querySelectorAll('.aircraft-req-line');
+    var aircraftSum=[];
+    aircraftLines.forEach(function(el){var t=el.querySelector('.rqAircraftType');var q=el.querySelector('.rqAircraftQty');if(t)aircraftSum.push({type:t.value,qty:q?q.value:''});});
+    var aircraftStr=aircraftSum.map(function(a){return a.type+(a.qty?' x'+a.qty:'');}).join(', ');
+    
+    // Collect airdrop lines
+    var airdropLines=document.querySelectorAll('.airdrop-req-line');
+    var airdropSum=[];
+    airdropLines.forEach(function(el){var t=el.querySelector('.rqAirdropType');var q=el.querySelector('.rqAirdropQty');if(t&&t.value&&t.value!=='None')airdropSum.push({type:t.value,qty:q?q.value:''});});
+    var airdropStr=airdropSum.length>0?airdropSum.map(function(a){return a.type+(a.qty?' x'+a.qty:'');}).join(', '):'None';
+    
     if(!pn){toast('Enter POC name','error');return;}
     if(!pe){toast('Enter POC email','error');return;}
     if(!pp){toast('Enter POC phone','error');return;}
@@ -8146,8 +8288,9 @@ function newParaRequest(){
       opFrom: opFrom,
       opTo: ((document.getElementById('rqOpTo')||{}).value||''),
       airfield: airfield, dz: dz,
-      aircraftType: ((document.getElementById('rqAircraft')||{}).value||''),
-      aircraftQty: ((document.getElementById('rqAircraftQty')||{}).value||''),
+      aircraftLines: aircraftSum,
+      aircraftType: aircraftStr,
+      aircraftQty: aircraftSum.reduce(function(s,a){return s+(parseInt(a.qty)||0);},0),
       inTrail: ((document.getElementById('rqInTrail')||{}).value||''),
       malc: ((document.getElementById('rqMALC')||{}).value||''),
       otherEquip: ((document.getElementById('rqOtherEquip')||{}).value||'').trim(),
@@ -8160,8 +8303,9 @@ function newParaRequest(){
       returnDate: returnDt,
       vehicleType: ((document.getElementById('rqVehicle')||{}).value||''),
       pickupPOC: pickupPOC, pickupPhone: pickupPhone,
-      airdropType: ((document.getElementById('rqAirdropType')||{}).value||''),
-      airdropQty: ((document.getElementById('rqAirdropQty')||{}).value||''),
+      airdropLines: airdropSum,
+      airdropType: airdropStr,
+      airdropQty: airdropSum.reduce(function(s,a){return s+(parseInt(a.qty)||0);},0),
       mre: ((document.getElementById('rqMRE')||{}).value||''),
       waterType: ((document.getElementById('rqWater')||{}).value||''),
       ammoType: ((document.getElementById('rqAmmo')||{}).value||''),
@@ -8189,18 +8333,23 @@ function newParaRequest(){
     overlay.remove();
     
     var summary='<div style="text-align:left;font-size:13px;line-height:2;">';
-    summary+='<strong>Unit:</strong> '+esc(unitVal)+'<br>';
+    summary+='<strong>Unit:</strong> '+esc(window._pendingRequest.unit)+'<br>';
     summary+='<strong>POC:</strong> '+esc(pn)+' / '+esc(pp)+' / '+esc(pe)+'<br>';
     summary+='<strong>Op Date:</strong> '+esc(opFrom||'')+'<br>';
     summary+='<strong>Airfield:</strong> '+esc(airfield||'')+'<br>';
     summary+='<strong>DZ:</strong> '+esc(dz||'')+'<br>';
+    summary+='<strong>Aircraft:</strong> '+esc(aircraftStr||'')+'<br>';
     summary+='<strong>Main Chute:</strong> '+paraSum.join(', ')+'<br>';
     summary+='<strong>Return Date:</strong> '+esc(returnDt||'')+'<br>';
     summary+='<strong>Pickup POC:</strong> '+esc(pickupPOC||'')+(pickupPhone?' ('+esc(pickupPhone)+')':'')+'<br>';
+    if(airdropStr&&airdropStr!=='None') summary+='<strong>Airdrop:</strong> '+esc(airdropStr)+'<br>';
     summary+='</div>';
     
     showConfirm('Confirm Request',summary,
-      [{label:'Go Back',cls:'btn-secondary',fn:function(){newParaRequest();}},
+      [{label:'Go Back',cls:'btn-secondary',fn:function(){
+        // Reopen form with cached data
+        newParaRequest(window._pendingRequest);
+      }},
        {label:'Submit Request',cls:'btn-primary',fn:function(){
          submitParaRequest();
          toast('Request submitted! An admin will review it.','success',5000);
@@ -8212,13 +8361,39 @@ function newParaRequest(){
 function addParaLine(){
   var container=document.getElementById('paraRequestLines');
   if(!container) return;
-  var paraTypes=['T-11 Main','MC-6 Main','T-11R Reserve','RA-1','RA-1R','Other'];
+  var paraTypes=['T-11 Main','MC-6 Main','T-11R Reserve','RA-1','RA-1R','RA-1 DBSL','Other'];
   var is='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:6px 10px;font-size:12px;font-family:inherit;outline:none;width:100%;';
   var div=document.createElement('div');
   div.className='para-req-line';
   div.style.cssText='display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-bottom:6px;padding:8px;border:1px solid var(--border);border-radius:6px;';
   var opts=paraTypes.map(function(t){return '<option value="'+t+'">'+t+'</option>';}).join('');
   div.innerHTML='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Type</label><select class="rqParaType" style="'+is+'">'+opts+'</select></div><div><label style="font-size:10px;color:var(--text-muted);display:block;">Qty</label><input class="rqParaQty" type="number" min="1" placeholder="Qty" style="'+is+'"></div><div style="display:flex;align-items:end;"><button onclick="this.parentElement.parentElement.remove()" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px;padding:6px;">\u2715</button></div>';
+  container.appendChild(div);
+}
+
+function addAircraftLine(){
+  var container=document.getElementById('aircraftLines');
+  if(!container) return;
+  var aircraft=['C130J','C130H','C17','CH47','UH60','Other'];
+  var is='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:6px 10px;font-size:12px;font-family:inherit;outline:none;width:100%;';
+  var div=document.createElement('div');
+  div.className='aircraft-req-line';
+  div.style.cssText='display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-bottom:6px;padding:8px;border:1px solid var(--border);border-radius:6px;';
+  var opts=aircraft.map(function(t){return '<option value="'+t+'">'+t+'</option>';}).join('');
+  div.innerHTML='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Aircraft Type</label><select class="rqAircraftType" style="'+is+'">'+opts+'</select></div><div><label style="font-size:10px;color:var(--text-muted);display:block;">Quantity</label><input class="rqAircraftQty" type="number" min="0" placeholder="Qty" style="'+is+'"></div><div style="display:flex;align-items:end;"><button onclick="this.parentElement.parentElement.remove()" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px;padding:6px;">\u2715</button></div>';
+  container.appendChild(div);
+}
+
+function addAirdropLine(){
+  var container=document.getElementById('airdropLines');
+  if(!container) return;
+  var airdrops=['None','CDS','Heavy Drop','Door Bundle','Other'];
+  var is='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:6px 10px;font-size:12px;font-family:inherit;outline:none;width:100%;';
+  var div=document.createElement('div');
+  div.className='airdrop-req-line';
+  div.style.cssText='display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-bottom:6px;padding:8px;border:1px solid var(--border);border-radius:6px;';
+  var opts=airdrops.map(function(t){return '<option value="'+t+'">'+t+'</option>';}).join('');
+  div.innerHTML='<div><label style="font-size:10px;color:var(--text-muted);display:block;">Airdrop Type</label><select class="rqAirdropType" style="'+is+'">'+opts+'</select></div><div><label style="font-size:10px;color:var(--text-muted);display:block;">Quantity</label><input class="rqAirdropQty" type="number" min="0" placeholder="Qty" style="'+is+'"></div><div style="display:flex;align-items:end;"><button onclick="this.parentElement.parentElement.remove()" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px;padding:6px;">\u2715</button></div>';
   container.appendChild(div);
 }
 
