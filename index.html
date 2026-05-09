@@ -676,6 +676,12 @@ function load(){
   // Ensure all required properties exist
   if(!S.sections) S.sections=[];
   if(!S.signedOut) S.signedOut=[];
+  // Drop ghost/legacy signedOut entries — only keep valid status=out entries
+  S.signedOut=S.signedOut.filter(function(so){
+    if(so.status!=='out') return false;
+    if(!so.unit && !so.system && !(parseInt(so.count)||0) && !(so.scannedOut||[]).length && !so._isBulk) return false;
+    return true;
+  });
    if(!S.equipmentCounts) S.equipmentCounts={};
   Object.keys(S.equipmentCounts).forEach(function(eq){var v=S.equipmentCounts[eq];if(Array.isArray(v))S.equipmentCounts[eq]={};else if(v&&typeof v==="object"){Object.keys(v).forEach(function(s){if(Array.isArray(v[s])){v[s]=v[s].filter(function(e){return e.bin||e.count;});if(v[s].length===0)delete v[s];}});}});
   if(!S.abnOps) S.abnOps=[];
@@ -1438,7 +1444,12 @@ async function loadFromDB() {
         return full;
       }catch(e){}
     }
-    return {unit:so.unit_name||'',system:so.system||'',count:so.count||'',_dbId:so.id};
+    return {unit:so.unit_name||'',system:so.system||'',count:so.count||'',status:'out',_dbId:so.id};
+  }).filter(function(so){
+    // Only keep entries explicitly marked as out — drop anything else as ghost data
+    if(so.status!=='out') return false;
+    if(!so.unit && !so.system && !(parseInt(so.count)||0) && !(so.scannedOut||[]).length && !so._isBulk) return false;
+    return true;
   });
   
   // Keep nextSectionId high enough
@@ -1581,7 +1592,7 @@ async function saveToDB() {
     
     // ── Save signed out (full JSON) ──
     await sbClient.from('pms_signed_out').delete().eq('unit_id', activeUnitId);
-    var soRows = (S.signedOut || []).filter(so => so.unit || so.system || so.count || so.totalQty).map(so => ({
+    var soRows = (S.signedOut || []).filter(so => so.status==='out' && (so.unit || so.system || so.count || so.totalQty || (so.scannedOut||[]).length)).map(so => ({
       unit_id: activeUnitId,
       unit_name: so.unit || '',
       system: so.system || '',
@@ -4808,11 +4819,10 @@ function renderPSR(){
       }
     });
     (S.signedOut||[]).forEach(function(so){
-      if(!so._requestId){
-        var soSys=(so.system||'').trim();
-        var sysMatch=(sys==='T-11R')?(soSys==='T-11R'||soSys==='T-11R SP'):(soSys===sys||soSys.includes(sys));
-        if(sysMatch) signedOut+=parseInt(so.count)||0;
-      }
+      if(so.status!=='out'||so._requestId) return;
+      var soSys=(so.system||'').trim();
+      var sysMatch=(sys==='T-11R')?(soSys==='T-11R'||soSys==='T-11R SP'):(soSys===sys);
+      if(sysMatch) signedOut+=parseInt(so.count)||0;
     });
     (S.abnOps||[]).forEach(function(op){
       var opSys=(op.system||'').trim();
