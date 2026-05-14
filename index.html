@@ -2870,6 +2870,12 @@ function sectionHTML(sec){
     const ec=expClass(earliest.expirationDate);
     dateInfo=`<span class="section-date-info">📅 Packed: <strong>${formatDate(earliest.packDate)}</strong> · Exp: <strong class="${ec}">${formatDate(earliest.expirationDate)}</strong></span>`;
   }
+  // Bulk expiration badge for set-count sections
+  let bulkExpInfo='';
+  if(sec.bulkExpDate){
+    const bec=expClass(sec.bulkExpDate);
+    bulkExpInfo=` · Exp: <strong class="${bec}">${sec.bulkExpDate}</strong>`;
+  }
   return `<div class="section-card" data-section-id="${sec.id}">
     <div class="section-header" onclick="toggleSec(${sec.id})">
       <div class="section-header-left">
@@ -2877,7 +2883,7 @@ function sectionHTML(sec){
         <span class="section-badge ${badge(sec.systemType)}">${sec.systemType}</span>
         <span class="section-title">${sec.binLocation}</span>
         <button class="btn btn-secondary" style="padding:2px 6px;font-size:10px;margin-left:4px;" onclick="event.stopPropagation();openBarcodeScanner(function(code){handleBinScan(code,${sec.id})})" title="Scan into this bin">📷</button>
-        <span class="section-meta">${rc} packed / ${totalRows} entries / ${sec.maxChutes} max</span>
+        <span class="section-meta">${rc} packed / ${totalRows} entries / ${sec.maxChutes} max${bulkExpInfo}</span>
         ${dateInfo}
       </div>
       <div class="section-header-right">
@@ -4706,27 +4712,28 @@ function renderPSR(){
   // Use auth (authorized) as total capacity if set
   if(ec['T-11']&&ec['T-11'].auth) actualT11=parseInt(ec['T-11'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='T-11') actualT11+=sec.rows.length+(parseInt(sec.bulkCount)||0);
+    // Include both packed rows AND signed-out bulk so total inventory = packed + out
+    if(sec.systemType==='T-11') actualT11+=sec.rows.length+(parseInt(sec.bulkCount)||0)+(parseInt(sec._bulkSignedOut)||0);
   });
   if(ec['T-11R']&&ec['T-11R'].auth) actualT11R=parseInt(ec['T-11R'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='T-11R'||sec.systemType==='T-11R SP') actualT11R+=sec.rows.length+(parseInt(sec.bulkCount)||0);
+    if(sec.systemType==='T-11R'||sec.systemType==='T-11R SP') actualT11R+=sec.rows.length+(parseInt(sec.bulkCount)||0)+(parseInt(sec._bulkSignedOut)||0);
   });
   if(ec['MC-6']&&ec['MC-6'].auth) actualMC6=parseInt(ec['MC-6'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='MC-6') actualMC6+=sec.rows.length+(parseInt(sec.bulkCount)||0);
+    if(sec.systemType==='MC-6') actualMC6+=sec.rows.length+(parseInt(sec.bulkCount)||0)+(parseInt(sec._bulkSignedOut)||0);
   });
   if(ec['RA-1']&&ec['RA-1'].auth) actualRA1=parseInt(ec['RA-1'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='RA-1') actualRA1+=sec.rows.length+(parseInt(sec.bulkCount)||0);
+    if(sec.systemType==='RA-1') actualRA1+=sec.rows.length+(parseInt(sec.bulkCount)||0)+(parseInt(sec._bulkSignedOut)||0);
   });
   if(ec['RA-1R']&&ec['RA-1R'].auth) actualRA1R=parseInt(ec['RA-1R'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='RA-1R') actualRA1R+=sec.rows.length+(parseInt(sec.bulkCount)||0);
+    if(sec.systemType==='RA-1R') actualRA1R+=sec.rows.length+(parseInt(sec.bulkCount)||0)+(parseInt(sec._bulkSignedOut)||0);
   });
   if(ec['RA-1 DBSL']&&ec['RA-1 DBSL'].auth) actualRA1DBSL=parseInt(ec['RA-1 DBSL'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='RA-1 DBSL') actualRA1DBSL+=sec.rows.length+(parseInt(sec.bulkCount)||0);
+    if(sec.systemType==='RA-1 DBSL') actualRA1DBSL+=sec.rows.length+(parseInt(sec.bulkCount)||0)+(parseInt(sec._bulkSignedOut)||0);
   });
   // Add popped + maintenance per system
   ['T-11'].forEach(sys=>{
