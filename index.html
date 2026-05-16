@@ -682,6 +682,17 @@ function load(){
     if(!so.unit && !so.system && !(parseInt(so.count)||0) && !(so.scannedOut||[]).length && !so._isBulk) return false;
     return true;
   });
+
+  // Reconcile _bulkSignedOut on each section — recompute from active sign-out records
+  // so stuck/ghost counts are cleared on load
+  S.sections.forEach(function(sec){ sec._bulkSignedOut=0; });
+  (S.signedOut||[]).filter(function(so){return so.status==='out'&&so._isBulk&&so.items;}).forEach(function(so){
+    so.items.forEach(function(item){
+      var sec=S.sections.find(function(s){return s.id===item.secId;})||
+              S.sections.find(function(s){return s.binLocation===item.bin&&s.systemType===item.system;});
+      if(sec) sec._bulkSignedOut=(parseInt(sec._bulkSignedOut)||0)+(parseInt(item.count)||0);
+    });
+  });
    if(!S.equipmentCounts) S.equipmentCounts={};
   Object.keys(S.equipmentCounts).forEach(function(eq){var v=S.equipmentCounts[eq];if(Array.isArray(v))S.equipmentCounts[eq]={};else if(v&&typeof v==="object"){Object.keys(v).forEach(function(s){if(Array.isArray(v[s])){v[s]=v[s].filter(function(e){return e.bin||e.count;});if(v[s].length===0)delete v[s];}});}});
   if(!S.abnOps) S.abnOps=[];
@@ -5219,7 +5230,8 @@ function delSignedOut(idx){
        // Restore bulk counts if it was a bulk sign-out
        if(old._isBulk&&old.items){
          old.items.forEach(function(item){
-           var sec=S.sections.find(function(s){return s.binLocation===item.bin&&s.systemType===item.system;});
+           var sec=S.sections.find(function(s){return s.id===item.secId;})||
+                   S.sections.find(function(s){return s.binLocation===item.bin&&s.systemType===item.system;});
            if(sec) sec._bulkSignedOut=Math.max(0,(parseInt(sec._bulkSignedOut)||0)-item.count);
          });
        }
@@ -6764,7 +6776,7 @@ function executeBulkIssue(){
     if(!sec._bulkSignedOut) sec._bulkSignedOut=0;
     sec._bulkSignedOut+=qty;
     totalQty+=qty;
-    items.push({bin:sec.binLocation,system:sec.systemType,count:qty});
+    items.push({bin:sec.binLocation,system:sec.systemType,secId:sec.id,count:qty});
   });
   
   if(totalQty===0){toast('Enter quantities to sign out','error');return;}
@@ -6797,9 +6809,12 @@ function returnBulkIssue(soIdx){
      {label:'Return All',cls:'btn-primary',fn:function(){
        // Restore bulk counts to sections
        (so.items||[]).forEach(function(item){
-         var sec=S.sections.find(function(s){return s.binLocation===item.bin&&s.systemType===item.system;});
+         var sec=S.sections.find(function(s){return s.id===item.secId;})||
+                 S.sections.find(function(s){return s.binLocation===item.bin&&s.systemType===item.system;});
          if(sec){
            sec._bulkSignedOut=Math.max(0,(parseInt(sec._bulkSignedOut)||0)-item.count);
+         } else {
+           console.warn('Return: section not found for',item);
          }
        });
        so.status='returned';
@@ -6828,7 +6843,8 @@ function returnBulkIssue(soIdx){
               var retQty=parseInt((document.getElementById('partRet-'+ii)||{}).value)||0;
               retQty=Math.min(retQty,item.count);
               if(retQty>0){
-                var sec=S.sections.find(function(s){return s.binLocation===item.bin&&s.systemType===item.system;});
+                var sec=S.sections.find(function(s){return s.id===item.secId;})||
+                        S.sections.find(function(s){return s.binLocation===item.bin&&s.systemType===item.system;});
                 if(sec) sec._bulkSignedOut=Math.max(0,(parseInt(sec._bulkSignedOut)||0)-retQty);
                 item.count-=retQty;
                 totalReturned+=retQty;
