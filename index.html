@@ -4657,10 +4657,10 @@ function renderPSR(){
   const ipToday={};
 
   S.sections.forEach(sec=>{
-    totalChutes+=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;}).length+(parseInt(sec.bulkCount)||0);
+    totalChutes+=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip&&!r._signedOut;}).length+Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
     totalCapacity+=sec.maxChutes;
     if(!systemTotals[sec.systemType]) systemTotals[sec.systemType]={count:0,capacity:0};
-    systemTotals[sec.systemType].count+=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;}).length+(parseInt(sec.bulkCount)||0);
+    systemTotals[sec.systemType].count+=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip&&!r._signedOut;}).length+Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
     systemTotals[sec.systemType].capacity+=sec.maxChutes;
 
     let earliestExp=null;
@@ -4883,7 +4883,7 @@ function renderPSR(){
   S.abnOps.forEach(op=>totalRequested+=(parseInt(op.requested)||0));
 
   // Available calculation
-  const availableChutes=totalChutes - totalExpiringAll - totalSignedOut - totalMaint;
+  const availableChutes=totalChutes - totalExpiringAll - totalMaint;
   const surplus=availableChutes - totalRequested;
 
   html+=`<div class="psr-section">
@@ -4954,7 +4954,7 @@ function renderPSR(){
       if(sysMatch) requested+=parseInt(op.requested)||0;
     });
     sysAvail[sys]={packed:packed,expiring:expiringThisMonth,signedOut:signedOut,requested:requested,
-      available:packed-requested-signedOut-expiringThisMonth};
+      available:packed-requested-expiringThisMonth};
   });
   
   html+=`<div>
@@ -5021,8 +5021,8 @@ function renderPSR(){
   const packedBySystem={};
   S.sections.forEach(sec=>{
     if(!packedBySystem[sec.systemType]) packedBySystem[sec.systemType]=0;
-    var packedRows=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;});
-    packedBySystem[sec.systemType]+=packedRows.length+(parseInt(sec.bulkCount)||0);
+    var packedRows=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip&&!r._signedOut;});
+    packedBySystem[sec.systemType]+=packedRows.length+Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
   });
 
   let hasPopped=false;
@@ -5127,7 +5127,7 @@ function takeSnapshot(){
 
 function createSnapshot(label){
   let totalChutes=0, totalPopped=0, totalSignedOut=0, totalMaint=0;
-  S.sections.forEach(sec=>totalChutes+=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;}).length+(parseInt(sec.bulkCount)||0));
+  S.sections.forEach(sec=>totalChutes+=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip&&!r._signedOut;}).length+Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0)));
   STATUS_SYS.forEach(sys=>{
     (S.statusCounts[sys]?.popped||[]).forEach(e=>totalPopped+=(parseInt(e.count)||0));
     (S.statusCounts[sys]?.maintenance||[]).forEach(e=>totalMaint+=(parseInt(e.count)||0));
@@ -5314,10 +5314,10 @@ function printPSR(){
   let totalChutes=0, totalExpired=0, expiring7=0, expiring30=0;
   const packedBySys={};
   S.sections.forEach(sec=>{
-    totalChutes+=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;}).length+(parseInt(sec.bulkCount)||0);
+    totalChutes+=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip&&!r._signedOut;}).length+Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
     if(!packedBySys[sec.systemType]) packedBySys[sec.systemType]=0;
-    var packedRows=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;});
-    packedBySys[sec.systemType]+=packedRows.length+(parseInt(sec.bulkCount)||0);
+    var packedRows=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip&&!r._signedOut;});
+    packedBySys[sec.systemType]+=packedRows.length+Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
     sec.rows.forEach(r=>{
       if(r.expirationDate){
         const exp=new Date(r.expirationDate+'T00:00:00');
@@ -5547,7 +5547,7 @@ function renderWeekly(){
     let totalPacked=0, totalExpired=0, popped=0;
     S.sections.forEach(sec=>{
       if(sec.systemType!==sys) return;
-      totalPacked+=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip;}).length+(parseInt(sec.bulkCount)||0);
+      totalPacked+=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&r.ip&&!r._signedOut;}).length+Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
       sec.rows.forEach(r=>{
         if(r.expirationDate){
           const exp=new Date(r.expirationDate+'T00:00:00');
