@@ -4739,31 +4739,35 @@ function renderPSR(){
   // Total capacity from equipment counts (configurable in PSR)
   var ec=S.equipmentCounts||{};
   let actualT11=0, actualT11R=0, actualMC6=0, actualRA1=0, actualRA1R=0, actualRA1DBSL=0;
-  // Use auth (authorized) as total capacity if set
+
+  // Helper: count only rows that have real data (not blank placeholder rows)
+  function countRealRows(sec){
+    return sec.rows.filter(function(r){return r.serialNumber&&r.packer;}).length;
+  }
+
   if(ec['T-11']&&ec['T-11'].auth) actualT11=parseInt(ec['T-11'].auth)||0;
   else S.sections.forEach(sec=>{
-    // Include both packed rows AND signed-out bulk so total inventory = packed + out
-    if(sec.systemType==='T-11') actualT11+=sec.rows.length+(parseInt(sec.bulkCount)||0)+(parseInt(sec._bulkSignedOut)||0);
+    if(sec.systemType==='T-11') actualT11+=countRealRows(sec)+(parseInt(sec.bulkCount)||0)+(parseInt(sec._bulkSignedOut)||0);
   });
   if(ec['T-11R']&&ec['T-11R'].auth) actualT11R=parseInt(ec['T-11R'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='T-11R'||sec.systemType==='T-11R SP') actualT11R+=sec.rows.length+(parseInt(sec.bulkCount)||0)+(parseInt(sec._bulkSignedOut)||0);
+    if(sec.systemType==='T-11R'||sec.systemType==='T-11R SP') actualT11R+=countRealRows(sec)+(parseInt(sec.bulkCount)||0)+(parseInt(sec._bulkSignedOut)||0);
   });
   if(ec['MC-6']&&ec['MC-6'].auth) actualMC6=parseInt(ec['MC-6'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='MC-6') actualMC6+=sec.rows.length+(parseInt(sec.bulkCount)||0)+(parseInt(sec._bulkSignedOut)||0);
+    if(sec.systemType==='MC-6') actualMC6+=countRealRows(sec)+(parseInt(sec.bulkCount)||0)+(parseInt(sec._bulkSignedOut)||0);
   });
   if(ec['RA-1']&&ec['RA-1'].auth) actualRA1=parseInt(ec['RA-1'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='RA-1') actualRA1+=sec.rows.length+(parseInt(sec.bulkCount)||0)+(parseInt(sec._bulkSignedOut)||0);
+    if(sec.systemType==='RA-1') actualRA1+=countRealRows(sec)+(parseInt(sec.bulkCount)||0)+(parseInt(sec._bulkSignedOut)||0);
   });
   if(ec['RA-1R']&&ec['RA-1R'].auth) actualRA1R=parseInt(ec['RA-1R'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='RA-1R') actualRA1R+=sec.rows.length+(parseInt(sec.bulkCount)||0)+(parseInt(sec._bulkSignedOut)||0);
+    if(sec.systemType==='RA-1R') actualRA1R+=countRealRows(sec)+(parseInt(sec.bulkCount)||0)+(parseInt(sec._bulkSignedOut)||0);
   });
   if(ec['RA-1 DBSL']&&ec['RA-1 DBSL'].auth) actualRA1DBSL=parseInt(ec['RA-1 DBSL'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='RA-1 DBSL') actualRA1DBSL+=sec.rows.length+(parseInt(sec.bulkCount)||0)+(parseInt(sec._bulkSignedOut)||0);
+    if(sec.systemType==='RA-1 DBSL') actualRA1DBSL+=countRealRows(sec)+(parseInt(sec.bulkCount)||0)+(parseInt(sec._bulkSignedOut)||0);
   });
   // Add popped + maintenance per system
   ['T-11'].forEach(sys=>{
