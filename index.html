@@ -1833,14 +1833,33 @@ function populateLoginDropdown(){
     dl.innerHTML+='<option value="'+esc(u.name)+'">';
   });
 }
-function doLogin(){
+async function doLogin(){
   var nameInput=document.getElementById('loginUser');
   var pin=document.getElementById('loginPin');
   var err=document.getElementById('loginError');
+  var btn=document.querySelector('.login-btn');
   var name=nameInput.value.trim();
   if(!name){err.textContent='Enter your last name';err.style.display='block';return;}
+
+  // If localStorage has no users, try syncing from Supabase first
   var users=getUsers();
-  var user=users.find(function(u){return u.name.toLowerCase()===name.toLowerCase();});
+  if(users.length===0 && sbClient){
+    err.textContent='Connecting to database…';
+    err.style.color='var(--accent)';
+    err.style.display='block';
+    if(btn) btn.disabled=true;
+    try{
+      var dbUsers=await getUsersDB();
+      if(dbUsers&&dbUsers.length>0){
+        localStorage.setItem('pms_users',JSON.stringify(dbUsers));
+        users=dbUsers;
+      }
+    }catch(e){ dbLog('doLogin syncUsers error: '+e.message); }
+    err.style.color='';
+    if(btn) btn.disabled=false;
+  }
+
+  var user=users.find(function(u){return (u.lastName||u.name).toLowerCase()===name.toLowerCase()||u.name.toLowerCase()===name.toLowerCase();});
   if(!user){err.textContent='Last name not found. Click "Create New Account" below.';err.style.display='block';return;}
   if(user.pin!==pin.value){err.textContent='Incorrect PIN';err.style.display='block';return;}
   err.style.display='none';
@@ -9323,6 +9342,7 @@ load(); autoMonthlySnapshot(); updateDL(); updateBinDL(); renderStatusBar(); ren
       dbReady = true;
       // Sync users from DB
       await syncUsers();
+      ensureDefaultAdmin();
       populateLoginDropdown();
       // Resolve active unit
       await resolveUnitId();
