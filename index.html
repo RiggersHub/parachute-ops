@@ -607,6 +607,7 @@
       <button class="btn btn-primary" style="font-size:10px;padding:3px 8px;margin-top:6px;margin-left:6px;" onclick="pushLocalToDB()">Push Local Data to Database</button>
       <button class="btn btn-primary" style="font-size:10px;padding:3px 8px;margin-top:6px;margin-left:6px;" onclick="syncFromDB()">Sync From Database</button>
       <button class="btn btn-danger" style="font-size:10px;padding:3px 8px;margin-top:6px;margin-left:6px;" onclick="clearAllLocalData()">Clear All Local Data</button>
+      <button class="btn btn-warning" style="font-size:10px;padding:3px 8px;margin-top:6px;margin-left:6px;background:var(--warning);color:#000;border:none;" onclick="resetBulkSignedOut()">Reset Stuck Sign-Out Counts</button>
       <button class="btn btn-secondary" style="font-size:10px;padding:3px 8px;margin-top:6px;margin-left:6px;" onclick="testDbMethods()">Test Connection</button>
     </div>
     <h3 style="font-size:14px;color:var(--text-secondary);margin-bottom:10px;">Audit Log</h3>
@@ -4747,27 +4748,27 @@ function renderPSR(){
 
   if(ec['T-11']&&ec['T-11'].auth) actualT11=parseInt(ec['T-11'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='T-11') actualT11+=countRealRows(sec)+(parseInt(sec.bulkCount)||0)+(parseInt(sec._bulkSignedOut)||0);
+    if(sec.systemType==='T-11') actualT11+=countRealRows(sec)+(parseInt(sec.bulkCount)||0);
   });
   if(ec['T-11R']&&ec['T-11R'].auth) actualT11R=parseInt(ec['T-11R'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='T-11R'||sec.systemType==='T-11R SP') actualT11R+=countRealRows(sec)+(parseInt(sec.bulkCount)||0)+(parseInt(sec._bulkSignedOut)||0);
+    if(sec.systemType==='T-11R'||sec.systemType==='T-11R SP') actualT11R+=countRealRows(sec)+(parseInt(sec.bulkCount)||0);
   });
   if(ec['MC-6']&&ec['MC-6'].auth) actualMC6=parseInt(ec['MC-6'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='MC-6') actualMC6+=countRealRows(sec)+(parseInt(sec.bulkCount)||0)+(parseInt(sec._bulkSignedOut)||0);
+    if(sec.systemType==='MC-6') actualMC6+=countRealRows(sec)+(parseInt(sec.bulkCount)||0);
   });
   if(ec['RA-1']&&ec['RA-1'].auth) actualRA1=parseInt(ec['RA-1'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='RA-1') actualRA1+=countRealRows(sec)+(parseInt(sec.bulkCount)||0)+(parseInt(sec._bulkSignedOut)||0);
+    if(sec.systemType==='RA-1') actualRA1+=countRealRows(sec)+(parseInt(sec.bulkCount)||0);
   });
   if(ec['RA-1R']&&ec['RA-1R'].auth) actualRA1R=parseInt(ec['RA-1R'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='RA-1R') actualRA1R+=countRealRows(sec)+(parseInt(sec.bulkCount)||0)+(parseInt(sec._bulkSignedOut)||0);
+    if(sec.systemType==='RA-1R') actualRA1R+=countRealRows(sec)+(parseInt(sec.bulkCount)||0);
   });
   if(ec['RA-1 DBSL']&&ec['RA-1 DBSL'].auth) actualRA1DBSL=parseInt(ec['RA-1 DBSL'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='RA-1 DBSL') actualRA1DBSL+=countRealRows(sec)+(parseInt(sec.bulkCount)||0)+(parseInt(sec._bulkSignedOut)||0);
+    if(sec.systemType==='RA-1 DBSL') actualRA1DBSL+=countRealRows(sec)+(parseInt(sec.bulkCount)||0);
   });
   // Add popped + maintenance per system
   ['T-11'].forEach(sys=>{
@@ -5360,36 +5361,31 @@ function printPSR(){
   let totalSignedOut=0;
   (S.signedOut||[]).filter(function(s){return s.status==='out'&&!s._requestId;}).forEach(s=>totalSignedOut+=(parseInt(s.count)||0));
 
-  // Capacity
-  // Total capacity from equipment counts (configurable in PSR)
+  // Capacity — match screen exactly, 6 systems, real rows only
   var ec=S.equipmentCounts||{};
-  let actualT11=0, actualMC6=0, actualRA1=0;
-  // Use auth (authorized) as total capacity if set
-  if(ec['T-11']&&ec['T-11'].auth) actualT11=parseInt(ec['T-11'].auth)||0;
-  else S.sections.forEach(sec=>{
-    if(sec.systemType==='T-11'||sec.systemType==='T-11R'||sec.systemType==='T-11R SP') actualT11+=sec.rows.length+(parseInt(sec.bulkCount)||0);
-  });
-  if(ec['MC-6']&&ec['MC-6'].auth) actualMC6=parseInt(ec['MC-6'].auth)||0;
-  else S.sections.forEach(sec=>{
-    if(sec.systemType==='MC-6') actualMC6+=sec.rows.length+(parseInt(sec.bulkCount)||0);
-  });
-  if(ec['RA-1']&&ec['RA-1'].auth) actualRA1=parseInt(ec['RA-1'].auth)||0;
-  else S.sections.forEach(sec=>{
-    if(sec.systemType==='RA-1'||sec.systemType==='RA-1R') actualRA1+=sec.rows.length+(parseInt(sec.bulkCount)||0);
-  });
-  ['T-11','T-11R/SP'].forEach(sys=>{
-    (S.statusCounts[sys]?.popped||[]).forEach(e=>actualT11+=(parseInt(e.count)||0));
-    (S.statusCounts[sys]?.maintenance||[]).forEach(e=>actualT11+=(parseInt(e.count)||0));
-  });
-  ['MC-6'].forEach(sys=>{
-    (S.statusCounts[sys]?.popped||[]).forEach(e=>actualMC6+=(parseInt(e.count)||0));
-    (S.statusCounts[sys]?.maintenance||[]).forEach(e=>actualMC6+=(parseInt(e.count)||0));
-  });
-  ['RA-1','RA-1R'].forEach(sys=>{
-    (S.statusCounts[sys]?.popped||[]).forEach(e=>actualRA1+=(parseInt(e.count)||0));
-    (S.statusCounts[sys]?.maintenance||[]).forEach(e=>actualRA1+=(parseInt(e.count)||0));
-  });
-  const capT11=S.capacityT11||0, capMC6=S.capacityMC6||0, capRA1=S.capacityRA1||0;
+  function printCountRealRows(sec){ return sec.rows.filter(function(r){return r.serialNumber&&r.packer;}).length; }
+  let pActualT11=0,pActualT11R=0,pActualMC6=0,pActualRA1=0,pActualRA1R=0,pActualRA1DBSL=0;
+  if(ec['T-11']&&ec['T-11'].auth) pActualT11=parseInt(ec['T-11'].auth)||0;
+  else S.sections.forEach(sec=>{ if(sec.systemType==='T-11') pActualT11+=printCountRealRows(sec)+(parseInt(sec.bulkCount)||0); });
+  if(ec['T-11R']&&ec['T-11R'].auth) pActualT11R=parseInt(ec['T-11R'].auth)||0;
+  else S.sections.forEach(sec=>{ if(sec.systemType==='T-11R'||sec.systemType==='T-11R SP') pActualT11R+=printCountRealRows(sec)+(parseInt(sec.bulkCount)||0); });
+  if(ec['MC-6']&&ec['MC-6'].auth) pActualMC6=parseInt(ec['MC-6'].auth)||0;
+  else S.sections.forEach(sec=>{ if(sec.systemType==='MC-6') pActualMC6+=printCountRealRows(sec)+(parseInt(sec.bulkCount)||0); });
+  if(ec['RA-1']&&ec['RA-1'].auth) pActualRA1=parseInt(ec['RA-1'].auth)||0;
+  else S.sections.forEach(sec=>{ if(sec.systemType==='RA-1') pActualRA1+=printCountRealRows(sec)+(parseInt(sec.bulkCount)||0); });
+  if(ec['RA-1R']&&ec['RA-1R'].auth) pActualRA1R=parseInt(ec['RA-1R'].auth)||0;
+  else S.sections.forEach(sec=>{ if(sec.systemType==='RA-1R') pActualRA1R+=printCountRealRows(sec)+(parseInt(sec.bulkCount)||0); });
+  if(ec['RA-1 DBSL']&&ec['RA-1 DBSL'].auth) pActualRA1DBSL=parseInt(ec['RA-1 DBSL'].auth)||0;
+  else S.sections.forEach(sec=>{ if(sec.systemType==='RA-1 DBSL') pActualRA1DBSL+=printCountRealRows(sec)+(parseInt(sec.bulkCount)||0); });
+  ['T-11'].forEach(sys=>{(S.statusCounts[sys]?.popped||[]).forEach(e=>pActualT11+=(parseInt(e.count)||0));(S.statusCounts[sys]?.maintenance||[]).forEach(e=>pActualT11+=(parseInt(e.count)||0));});
+  ['T-11R/SP'].forEach(sys=>{(S.statusCounts[sys]?.popped||[]).forEach(e=>pActualT11R+=(parseInt(e.count)||0));(S.statusCounts[sys]?.maintenance||[]).forEach(e=>pActualT11R+=(parseInt(e.count)||0));});
+  ['MC-6'].forEach(sys=>{(S.statusCounts[sys]?.popped||[]).forEach(e=>pActualMC6+=(parseInt(e.count)||0));(S.statusCounts[sys]?.maintenance||[]).forEach(e=>pActualMC6+=(parseInt(e.count)||0));});
+  ['RA-1'].forEach(sys=>{(S.statusCounts[sys]?.popped||[]).forEach(e=>pActualRA1+=(parseInt(e.count)||0));(S.statusCounts[sys]?.maintenance||[]).forEach(e=>pActualRA1+=(parseInt(e.count)||0));});
+  ['RA-1R'].forEach(sys=>{(S.statusCounts[sys]?.popped||[]).forEach(e=>pActualRA1R+=(parseInt(e.count)||0));(S.statusCounts[sys]?.maintenance||[]).forEach(e=>pActualRA1R+=(parseInt(e.count)||0));});
+  ['RA-1 DBSL'].forEach(sys=>{(S.statusCounts[sys]?.popped||[]).forEach(e=>pActualRA1DBSL+=(parseInt(e.count)||0));(S.statusCounts[sys]?.maintenance||[]).forEach(e=>pActualRA1DBSL+=(parseInt(e.count)||0));});
+  const pCapT11=S.capacityT11||0,pCapT11R=S.capacityT11R||0,pCapMC6=S.capacityMC6||0,pCapRA1=S.capacityRA1||0,pCapRA1R=S.capacityRA1R||0,pCapRA1DBSL=S.capacityRA1DBSL||0;
+  const pTotalCap=pCapT11+pCapT11R+pCapMC6+pCapRA1+pCapRA1R+pCapRA1DBSL;
+  const pTotalAct=pActualT11+pActualT11R+pActualMC6+pActualRA1+pActualRA1R+pActualRA1DBSL;
 
   let body=`<h1>Parachute Status Report (PSR)</h1>`;
   body+=`<div class="header-info">Printed: ${printed}</div>`;
@@ -5406,23 +5402,25 @@ function printPSR(){
   // Capacity
   body+=`<div style="font-size:13px;font-weight:700;margin-top:14px;margin-bottom:4px;color:#111;background:#fff;padding:2px 0;">Capacity Accountability</div>`;
   body+=`<table><thead><tr><th>System</th><th>Capacity</th><th>Accounted</th><th>Difference</th></tr></thead><tbody>`;
-  const capRows=[['T-11',capT11,actualT11],['MC-6',capMC6,actualMC6],['RA-1',capRA1,actualRA1]];
-  capRows.forEach(([sys,cap,act])=>{
+  const pCapRows=[['T-11',pCapT11,pActualT11],['T-11R',pCapT11R,pActualT11R],['MC-6',pCapMC6,pActualMC6],['RA-1',pCapRA1,pActualRA1],['RA-1R',pCapRA1R,pActualRA1R],['RA-1 DBSL',pCapRA1DBSL,pActualRA1DBSL]];
+  pCapRows.forEach(([sys,cap,act])=>{
+    if(cap===0&&act===0) return;
     const diff=act-cap;
-    const cls=diff!==0?'exp-expired':'';
-    body+=`<tr><td><strong>${sys}</strong></td><td>${cap}</td><td>${act}</td><td class="${cls}"><strong>${diff>0?'+'+diff:diff===0?'✓':diff}</strong></td></tr>`;
+    body+=`<tr><td><strong>${sys}</strong></td><td>${cap}</td><td>${act}</td><td class="${diff!==0?'exp-expired':''}"><strong>${diff>0?'+'+diff:diff===0?'✓':diff}</strong></td></tr>`;
   });
-  body+=`<tr style="border-top:2px solid #333;"><td><strong>TOTAL</strong></td><td><strong>${capT11+capMC6+capRA1}</strong></td><td><strong>${actualT11+actualMC6+actualRA1}</strong></td><td class="${(actualT11+actualMC6+actualRA1)!==(capT11+capMC6+capRA1)?'exp-expired':''}"><strong>${((actualT11+actualMC6+actualRA1)-(capT11+capMC6+capRA1))===0?'✓':((actualT11+actualMC6+actualRA1)-(capT11+capMC6+capRA1))>0?'+'+((actualT11+actualMC6+actualRA1)-(capT11+capMC6+capRA1)):((actualT11+actualMC6+actualRA1)-(capT11+capMC6+capRA1))}</strong></td></tr>`;
+  const pTotalDiff=pTotalAct-pTotalCap;
+  body+=`<tr style="border-top:2px solid #333;"><td><strong>TOTAL</strong></td><td><strong>${pTotalCap}</strong></td><td><strong>${pTotalAct}</strong></td><td class="${pTotalDiff!==0?'exp-expired':''}"><strong>${pTotalDiff>0?'+'+pTotalDiff:pTotalDiff===0?'✓':pTotalDiff}</strong></td></tr>`;
   body+=`</tbody></table>`;
 
-  // Signed Out
-  if((S.signedOut||[]).length>0){
+  var activeSOs=(S.signedOut||[]).filter(function(s){return s.status==='out';});
+  if(activeSOs.length>0){
     body+=`<div style="font-size:13px;font-weight:700;margin-top:14px;margin-bottom:4px;color:#111;background:#fff;padding:2px 0;">Signed Out Chutes</div>`;
-    body+=`<table><thead><tr><th>Unit</th><th>Qty</th></tr></thead><tbody>`;
-    (S.signedOut||[]).forEach(s=>{
-      body+=`<tr><td>${esc(s.unit)||'—'}</td><td>${parseInt(s.count)||0}</td></tr>`;
+    body+=`<table><thead><tr><th>Unit</th><th>System</th><th>Qty</th><th>Date</th></tr></thead><tbody>`;
+    activeSOs.forEach(s=>{
+      var qty=(s.scannedOut||[]).length||parseInt(s.count)||s.totalQty||0;
+      body+=`<tr><td>${esc(s.unit)||'—'}</td><td>${esc(s.system)||'—'}</td><td>${qty}</td><td>${s.date||'—'}</td></tr>`;
     });
-    body+=`<tr style="border-top:2px solid #333;"><td><strong>TOTAL</strong></td><td><strong>${totalSignedOut}</strong></td></tr></tbody></table>`;
+    body+=`<tr style="border-top:2px solid #333;"><td><strong>TOTAL</strong></td><td></td><td><strong>${totalSignedOut}</strong></td><td></td></tr></tbody></table>`;
   }
 
   // ABN Ops
@@ -9415,6 +9413,29 @@ function startAutoSync(){
 }
 function stopAutoSync(){
   if(_autoSyncInterval){clearInterval(_autoSyncInterval);_autoSyncInterval=null;}
+}
+
+function resetBulkSignedOut(){
+  showConfirm('Reset Stuck Sign-Out Counts',
+    'This will zero out all bulk signed-out counts on every section and reconcile from active sign-out records only. Use this if chutes show as signed out but nothing is actually out.<br><br><strong>No data will be deleted.</strong>',
+    [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
+     {label:'Reset Counts',cls:'btn-danger',fn:function(){
+       // Zero every section
+       S.sections.forEach(function(sec){ sec._bulkSignedOut=0; });
+       // Replay only active sign-out records
+       (S.signedOut||[]).filter(function(so){return so.status==='out'&&so._isBulk&&so.items;}).forEach(function(so){
+         so.items.forEach(function(item){
+           var sec=S.sections.find(function(s){return s.id===item.secId;})||
+                   S.sections.find(function(s){return s.binLocation===item.bin&&s.systemType===item.system;});
+           if(sec) sec._bulkSignedOut=(parseInt(sec._bulkSignedOut)||0)+(parseInt(item.count)||0);
+         });
+       });
+       auditLog('config','Reset Bulk Counts','All _bulkSignedOut counts reconciled from active records');
+       save();
+       renderPSR();
+       renderSections();
+       toast('Sign-out counts reset and reconciled','success');
+     }}]);
 }
 
 function clearAllLocalData(){
