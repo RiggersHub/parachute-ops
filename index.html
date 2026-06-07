@@ -2974,6 +2974,7 @@ function rowHTML(sec,r,i){
     <td><input type="text" list="ip-list" value="${esc(r.ip)}" placeholder="IP" onchange="onIP(${sec.id},${i},this.value,this)" class="tab-field" ${dis}></td>
     <td><input type="date" value="${r.packDate||''}" onchange="upd(${sec.id},${i},'packDate',this.value)" style="width:115px;" class="tab-field" ${dis}></td>
     <td><div class="row-actions">
+      <button class="row-action-btn" onclick="openDataBlockScan(${sec.id},${i})" title="Scan data block photo">📷</button>
       <button class="row-action-btn" onclick="toggleLock(${sec.id},${i})" title="${locked?'Unlock to edit':'Lock row'}">${locked?'🔒':'✏️'}</button>
       <button class="row-action-btn delete" onclick="delRow(${sec.id},${i})" title="Delete">🗑</button>
     </div></td>
@@ -9172,6 +9173,179 @@ function showHelp(){
 // ══ BARCODE CAMERA SCANNER ══
 var _scanCallback=null;
 var _scanActive=false;
+
+// ══════════════════════════════════════════════
+// DATA BLOCK PHOTO SCAN — Claude Vision API
+// ══════════════════════════════════════════════
+function openDataBlockScan(secId, rowIdx){
+  // Build the modal with camera capture / file upload
+  var overlay=document.createElement('div');
+  overlay.id='dataBlockOverlay';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:10002;display:flex;align-items:center;justify-content:center;';
+
+  overlay.innerHTML=`
+    <div style="background:var(--bg-card);border-radius:12px;padding:24px;max-width:480px;width:95%;text-align:center;">
+      <div style="font-size:16px;font-weight:700;margin-bottom:6px;">📷 Scan Data Block</div>
+      <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">Take a photo of the parachute data block or choose an image. The AI will read the serial number, DOM, and PIS automatically.</div>
+
+      <div id="dbScanPreview" style="display:none;margin-bottom:12px;">
+        <img id="dbScanImg" style="max-width:100%;max-height:240px;border-radius:8px;border:1px solid var(--border);">
+      </div>
+
+      <div id="dbScanStatus" style="font-size:13px;color:var(--accent);margin-bottom:12px;display:none;"></div>
+
+      <div id="dbScanResult" style="display:none;background:var(--bg-secondary);border-radius:8px;padding:12px;margin-bottom:16px;text-align:left;">
+        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">DETECTED VALUES — tap to edit before saving:</div>
+        <div style="display:grid;grid-template-columns:80px 1fr;gap:6px;align-items:center;font-size:13px;">
+          <label style="color:var(--text-muted);">Serial No.</label>
+          <input id="dbRes_sn" style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:5px 8px;font-size:13px;outline:none;width:100%;box-sizing:border-box;">
+          <label style="color:var(--text-muted);">DOM</label>
+          <input id="dbRes_dom" placeholder="MMYY" style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:5px 8px;font-size:13px;outline:none;width:100%;box-sizing:border-box;">
+          <label style="color:var(--text-muted);">PIS</label>
+          <input id="dbRes_pis" placeholder="MMYY" style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:5px 8px;font-size:13px;outline:none;width:100%;box-sizing:border-box;">
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
+        <label style="background:var(--accent);color:#fff;padding:9px 18px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">
+          📸 Take / Choose Photo
+          <input type="file" id="dbScanInput" accept="image/*" capture="environment" style="display:none;" onchange="handleDataBlockPhoto(event,${secId},${rowIdx})">
+        </label>
+        <button id="dbApplyBtn" style="display:none;background:var(--success);color:#fff;border:none;padding:9px 18px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;" onclick="applyDataBlockResult(${secId},${rowIdx})">✓ Apply to Row</button>
+        <button style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:9px 18px;border-radius:6px;cursor:pointer;font-size:13px;" onclick="document.getElementById('dataBlockOverlay').remove()">Cancel</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+}
+
+async function handleDataBlockPhoto(event, secId, rowIdx){
+  var file=event.target.files[0];
+  if(!file) return;
+
+  // Show preview
+  var reader=new FileReader();
+  reader.onload=async function(e){
+    var dataUrl=e.target.result;
+    var img=document.getElementById('dbScanImg');
+    var preview=document.getElementById('dbScanPreview');
+    var status=document.getElementById('dbScanStatus');
+    var result=document.getElementById('dbScanResult');
+    var applyBtn=document.getElementById('dbApplyBtn');
+
+    if(img) img.src=dataUrl;
+    if(preview) preview.style.display='block';
+    if(status){ status.textContent='🔍 Reading data block…'; status.style.display='block'; }
+    if(result) result.style.display='none';
+    if(applyBtn) applyBtn.style.display='none';
+
+    // Strip the data URL prefix to get base64
+    var base64=dataUrl.split(',')[1];
+    var mimeType=file.type||'image/jpeg';
+
+    try{
+      var response=await fetch('https://api.anthropic.com/v1/messages',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({
+          model:'claude-sonnet-4-20250514',
+          max_tokens:300,
+          messages:[{
+            role:'user',
+            content:[
+              {
+                type:'image',
+                source:{type:'base64',media_type:mimeType,data:base64}
+              },
+              {
+                type:'text',
+                text:'This is a photo of a military parachute data block. Extract the following fields and respond ONLY with valid JSON, no other text:\n{\n  "serialNumber": "the serial number (numbers only, no dashes or spaces)",\n  "dom": "date of manufacture as MMYY format (e.g. 0312 for March 2012)",\n  "pis": "put in service date as MMYY format (e.g. 0614 for June 2014)"\n}\nIf a field is not visible or unreadable, use an empty string. Do not include any explanation.'
+              }
+            ]
+          }]
+        })
+      });
+
+      var data=await response.json();
+      var text=(data.content||[]).map(function(c){return c.text||'';}).join('');
+
+      // Parse JSON from response
+      var parsed=null;
+      try{
+        var clean=text.replace(/```json|```/g,'').trim();
+        parsed=JSON.parse(clean);
+      }catch(pe){
+        // Try to extract JSON from anywhere in the text
+        var match=text.match(/\{[\s\S]*\}/);
+        if(match) try{ parsed=JSON.parse(match[0]); }catch(e2){}
+      }
+
+      if(!parsed){
+        if(status){ status.textContent='❌ Could not read data block. Try a clearer photo.'; status.style.color='var(--danger)'; }
+        return;
+      }
+
+      // Fill result fields
+      var snEl=document.getElementById('dbRes_sn');
+      var domEl=document.getElementById('dbRes_dom');
+      var pisEl=document.getElementById('dbRes_pis');
+      if(snEl) snEl.value=parsed.serialNumber||'';
+      if(domEl) domEl.value=parsed.dom||'';
+      if(pisEl) pisEl.value=parsed.pis||'';
+
+      if(status){ status.textContent='✅ Data block read successfully. Review and apply.'; status.style.color='var(--success)'; }
+      if(result) result.style.display='block';
+      if(applyBtn) applyBtn.style.display='inline-block';
+
+    }catch(err){
+      if(status){ status.textContent='❌ Error: '+err.message+'. Check connection and try again.'; status.style.color='var(--danger)'; }
+    }
+  };
+  reader.readAsDataURL(file);
+}
+
+function applyDataBlockResult(secId, rowIdx){
+  var sn=(document.getElementById('dbRes_sn')||{}).value||'';
+  var dom=(document.getElementById('dbRes_dom')||{}).value||'';
+  var pis=(document.getElementById('dbRes_pis')||{}).value||'';
+
+  var sec=S.sections.find(function(s){return s.id===secId;});
+  if(!sec||!sec.rows[rowIdx]){ toast('Row not found','error'); return; }
+
+  var row=sec.rows[rowIdx];
+
+  if(sn) row.serialNumber=sn.trim();
+  if(dom) row.dom=dom.trim();
+  if(pis) row.pis=pis.trim();
+
+  // Recalc OSD
+  if(row.dom&&row.pis) row.osd=calcOSDString(row.dom,row.pis)||'';
+
+  // Update master inventory
+  if(sn.trim()&&(dom.trim()||pis.trim())){
+    if(!S.masterInventory) S.masterInventory={};
+    if(!S.masterInventory[sn.trim()]) S.masterInventory[sn.trim()]={};
+    if(dom.trim()) S.masterInventory[sn.trim()].dom=dom.trim();
+    if(pis.trim()) S.masterInventory[sn.trim()].pis=pis.trim();
+  }
+
+  auditLog('section','Data Block Scan','Scanned S/N '+sn+' DOM '+dom+' PIS '+pis+' into '+sec.binLocation);
+  save();
+
+  // Re-render just that row
+  var tr=document.querySelector(`tr[data-sec="${secId}"][data-ri="${rowIdx}"]`)||
+         document.querySelector(`#tb-${secId}`)?.querySelectorAll('tr')[rowIdx];
+  if(tr){
+    var tmp=document.createElement('tbody');
+    tmp.innerHTML=rowHTML(sec,row,rowIdx);
+    tr.replaceWith(tmp.firstChild);
+  } else {
+    renderSections();
+  }
+
+  document.getElementById('dataBlockOverlay')?.remove();
+  toast('Data block applied to row — S/N: '+sn,'success');
+}
 
 function openBarcodeScanner(callback){
   if(_scanActive) return;
