@@ -4296,6 +4296,167 @@ function closeWizard(){
 
 var _pendingUnitDelete=null;
 
+function openTransferChutes(){
+  var units=getUnits().filter(function(u){return u.id!==getActiveUnit();});
+  if(units.length===0){toast('No other units to transfer to','error');return;}
+
+  var is='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:7px 10px;font-size:12px;font-family:inherit;outline:none;width:100%;box-sizing:border-box;';
+
+  // Build destination unit options
+  var unitOpts=units.map(function(u){return '<option value="'+u.id+'">'+esc(u.name||u.id)+(u.designation?' ('+esc(u.designation)+')':'')+'</option>';}).join('');
+
+  // Build section rows — both serial-number sections and bulk sections
+  var sectionRows='';
+  S.sections.forEach(function(sec){
+    var available=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&!r._signedOut;}).length+Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
+    if(available===0) return;
+    sectionRows+=`<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:10px;margin-bottom:6px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;">
+      <input type="checkbox" id="txSec-${sec.id}" style="width:16px;height:16px;cursor:pointer;" onchange="document.getElementById('txQty-${sec.id}').disabled=!this.checked;if(this.checked)document.getElementById('txQty-${sec.id}').focus();">
+      <div>
+        <span style="font-weight:600;">${esc(sec.binLocation)}</span>
+        <span style="font-size:11px;color:var(--text-muted);margin-left:8px;">${esc(sec.systemType)}</span>
+      </div>
+      <div style="font-size:11px;color:var(--text-muted);">Avail: <strong style="color:var(--accent);">${available}</strong></div>
+      <input type="number" id="txQty-${sec.id}" min="1" max="${available}" placeholder="Qty" disabled style="width:70px;font-size:13px;text-align:center;${is}opacity:0.5;" onfocus="this.style.opacity='1';">
+    </div>`;
+  });
+
+  if(!sectionRows){toast('No chutes available to transfer','warning');return;}
+
+  var html=`<div style="text-align:left;">
+    <div style="margin-bottom:12px;">
+      <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:4px;">Transfer To</label>
+      <select id="txDestUnit" style="${is}">${unitOpts}</select>
+    </div>
+    <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;">Select Sections to Transfer</div>
+    ${sectionRows}
+    <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">Bulk sections transfer by quantity. Serial-number sections transfer the oldest-packed chutes first.</div>
+  </div>`;
+
+  showConfirm('⇄ Transfer Chutes', html, [
+    {label:'Cancel',cls:'btn-secondary',fn:function(){}},
+    {label:'Transfer',cls:'btn-primary',fn:function(){ executeTransfer(); }}
+  ]);
+}
+
+async function executeTransfer(){
+  var destUnitId=(document.getElementById('txDestUnit')||{}).value;
+  if(!destUnitId){toast('Select a destination unit','error');return;}
+
+  var destUnits=getUnits().filter(function(u){return u.id===destUnitId;});
+  if(!destUnits.length){toast('Destination unit not found','error');return;}
+  var destUnit=destUnits[0];
+
+  // Collect selected sections and quantities
+  var transfers=[];
+  S.sections.forEach(function(sec){
+    var cb=document.getElementById('txSec-'+sec.id);
+    var qtyEl=document.getElementById('txQty-'+sec.id);
+    if(!cb||!cb.checked) return;
+    var qty=parseInt((qtyEl||{}).value)||0;
+    var available=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&!r._signedOut;}).length+Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
+    if(qty<=0||qty>available){toast('Invalid quantity for '+sec.binLocation,'error');return;}
+    transfers.push({sec:sec,qty:qty});
+  });
+
+  if(transfers.length===0){toast('Select at least one section and quantity','error');return;}
+
+  // Load destination unit's data from localStorage
+  var destStorageKey='pms_data_'+destUnitId;
+  var destS=null;
+  try{ destS=JSON.parse(localStorage.getItem(destStorageKey)||'null'); }catch(e){}
+  if(!destS) destS={sections:[],binLocations:[],knownPackers:[],knownIPs:[],masterInventory:{},statusCounts:{},equipmentCounts:{},mffData:{},archive:{deletedRows:[],deletedSections:[],monthlyLogs:[]},nextSectionId:1};
+  if(!destS.sections) destS.sections=[];
+
+  var totalMoved=0;
+  var summary=[];
+
+  transfers.forEach(function(t){
+    var sec=t.sec;
+    var qty=t.qty;
+    var isBulk=(parseInt(sec.bulkCount)||0)>0&&sec.rows.filter(function(r){return r.serialNumber;}).length===0;
+
+    // Build a matching section in destination (same bin name + system)
+    var destSec=destS.sections.find(function(s){return s.binLocation===sec.binLocation&&s.systemType===sec.systemType;});
+    if(!destSec){
+      destSec={
+        id:(destS.nextSectionId||1),
+        binLocation:sec.binLocation,
+        systemType:sec.systemType,
+        maxChutes:sec.maxChutes,
+        bulkCount:0,
+        _bulkSignedOut:0,
+        bulkPackDate:sec.bulkPackDate||'',
+        bulkExpDate:sec.bulkExpDate||'',
+        rows:[]
+      };
+      destS.sections.push(destSec);
+      destS.nextSectionId=(destS.nextSectionId||1)+1;
+    }
+
+    if(isBulk){
+      // Bulk transfer: just move the count
+      var available=Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
+      var moving=Math.min(qty,available);
+      sec.bulkCount=Math.max(0,(parseInt(sec.bulkCount)||0)-moving);
+      destSec.bulkCount=(parseInt(destSec.bulkCount)||0)+moving;
+      destSec.bulkPackDate=destSec.bulkPackDate||sec.bulkPackDate||'';
+      destSec.bulkExpDate=destSec.bulkExpDate||sec.bulkExpDate||'';
+      totalMoved+=moving;
+      summary.push(moving+' '+sec.systemType+' ('+sec.binLocation+') bulk');
+    } else {
+      // Serial number transfer: move oldest-packed rows first
+      var packedRows=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&!r._signedOut;});
+      packedRows.sort(function(a,b){return (a.packDate||'').localeCompare(b.packDate||'');});
+      var toMove=packedRows.slice(0,qty);
+      toMove.forEach(function(row){
+        // Remove from source
+        var idx=sec.rows.indexOf(row);
+        if(idx>-1) sec.rows.splice(idx,1);
+        // Add to destination
+        destSec.rows.push(Object.assign({},row,{_dbId:undefined}));
+        // Transfer master inventory entry
+        if(row.serialNumber&&destS.masterInventory){
+          destS.masterInventory[row.serialNumber]=S.masterInventory?.[row.serialNumber]||{};
+        }
+      });
+      totalMoved+=toMove.length;
+      summary.push(toMove.length+' '+sec.systemType+' ('+sec.binLocation+')');
+    }
+  });
+
+  if(totalMoved===0){toast('Nothing was transferred','warning');return;}
+
+  // Save source (current unit)
+  save();
+
+  // Save destination unit to localStorage
+  localStorage.setItem(destStorageKey, JSON.stringify(destS));
+
+  // Push destination to Supabase if connected
+  if(sbClient&&destUnit._dbId){
+    try{
+      var prevActiveUnitId=activeUnitId;
+      var prevS=JSON.parse(JSON.stringify(S));
+      // Temporarily switch context to dest unit to save
+      activeUnitId=destUnit._dbId;
+      S=destS;
+      await saveToDB();
+      // Restore source context
+      activeUnitId=prevActiveUnitId;
+      S=prevS;
+    }catch(e){ dbLog('Transfer dest save error: '+e.message); }
+  }
+
+  auditLog('config','Transfer Chutes','Transferred '+totalMoved+' chutes to '+(destUnit.name||destUnitId)+': '+summary.join(', '));
+  save();
+  renderSections();
+  renderHome();
+  renderPSR();
+
+  toast('✓ Transferred '+totalMoved+' chutes to '+(destUnit.name||destUnit.id),'success',5000);
+}
+
 function deleteUnit(){
   const id=getActiveUnit();
   if(id==='default'){toast('Cannot delete default unit','error');return;}
@@ -4508,6 +4669,7 @@ function renderHome(){
     </div>
     <button class="btn btn-primary btn-sm" onclick="addUnit()">+ Add Unit</button>
     ${getActiveUnit()!=='default'?'<button class="btn btn-danger btn-sm" onclick="deleteUnit()">🗑 Delete Unit</button>':''}
+    ${getUnits().filter(u=>u.id!==getActiveUnit()).length>0?'<button class="btn btn-secondary btn-sm" onclick="openTransferChutes()" style="margin-left:4px;">⇄ Transfer Chutes</button>':''}
   </div>`;
 
   // Unit Info Header
