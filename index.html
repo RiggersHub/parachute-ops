@@ -1744,7 +1744,7 @@ async function syncFromDB(){
 async function resolveUnitId() {
   if (!sbClient) return;
   var localId = getActiveUnit();
-  if (localId === 'default') {
+  if (!localId) {
     activeUnitId = null;
     return;
   }
@@ -3961,7 +3961,19 @@ function saveUnits(units){
     units.forEach(function(u){ saveUnitDB(u).catch(function(e){console.error('DB saveUnit error:',e);}); });
   }
 }
-function getActiveUnit(){ return localStorage.getItem('pms_activeUnit')||'default'; }
+function getActiveUnit(){
+  var stored=localStorage.getItem('pms_activeUnit');
+  if(stored) return stored;
+  // Fall back to first real unit if no active set
+  var units=getUnits();
+  if(units.length>0){ localStorage.setItem('pms_activeUnit',units[0].id); return units[0].id; }
+  return 'default';
+}
+
+function getUnitInfo(){
+  var units=getUnits();
+  return units.find(function(u){return u.id===getActiveUnit();})||{id:'',name:'',designation:'',commander:'',facility:'',contact:''};
+}
 function setActiveUnit(id){
   // Save current unit data
   save();
@@ -3978,19 +3990,28 @@ function setActiveUnit(id){
 if(!localStorage.getItem('pms_data_default') && localStorage.getItem('paraOps4')){
   localStorage.setItem('pms_data_default', localStorage.getItem('paraOps4'));
 }
-// Ensure default unit exists in units list
+// Remove any nameless default unit that got injected automatically
 (function(){
-  let units=getUnits();
-  if(!units.find(u=>u.id==='default')){
-    units.unshift({id:'default',name:'',designation:'',commander:'',facility:'',contact:''});
-    saveUnits(units);
+  var units=getUnits();
+  var cleaned=units.filter(function(u){
+    // Remove the blank default unit if it has no name and no data
+    if(u.id==='default'&&!u.name&&!u.designation&&!u.commander&&!u.facility){
+      // Only remove if it has no actual section data
+      try{
+        var d=JSON.parse(localStorage.getItem('pms_data_default')||'{}');
+        if(!d.sections||d.sections.length===0) return false;
+      }catch(e){ return false; }
+    }
+    return true;
+  });
+  if(cleaned.length!==units.length) saveUnits(cleaned);
+  // If active unit was default and it got removed, switch to first real unit
+  var active=localStorage.getItem('pms_activeUnit');
+  if(active==='default'&&!cleaned.find(function(u){return u.id==='default';})){
+    if(cleaned.length>0) localStorage.setItem('pms_activeUnit',cleaned[0].id);
+    else localStorage.removeItem('pms_activeUnit');
   }
 })();
-
-function getUnitInfo(){
-  const units=getUnits();
-  return units.find(u=>u.id===getActiveUnit())||{id:'default',name:'',designation:'',commander:'',facility:'',contact:''};
-}
 
 function saveUnitField(field,val){
   const units=getUnits();
@@ -4459,22 +4480,25 @@ async function executeTransfer(){
 
 function deleteUnit(){
   const id=getActiveUnit();
-  if(id==='default'){toast('Cannot delete default unit','error');return;}
   const units=getUnits();
+  if(units.length<=1){toast('Cannot delete the only unit','error');return;}
   const unit=units.find(u=>u.id===id);
-  showConfirm('Delete Unit','Delete <strong>'+esc(unit?.name||'this unit')+'</strong> and all its data? You will have 10 seconds to undo.',
+  showConfirm('Delete Unit','Delete <strong>'+esc(unit?.name||id)+'</strong> and all its data? You will have 10 seconds to undo.',
     [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
      {label:'Delete',cls:'btn-danger',fn:function(){
        // Store unit data for undo
        var unitData=null;
        try{unitData=localStorage.getItem('pms_data_'+id);}catch(e){}
        _pendingUnitDelete={id:id,unit:JSON.parse(JSON.stringify(unit)),unitData:unitData,units:JSON.parse(JSON.stringify(units))};
-       
+
        // Remove locally
        const filtered=units.filter(u=>u.id!==id);
        saveUnits(filtered);
        localStorage.removeItem('pms_data_'+id);
-       setActiveUnit('default');
+       // Switch to first remaining unit
+       var nextId=filtered.length>0?filtered[0].id:'';
+       if(nextId) setActiveUnit(nextId);
+       else localStorage.removeItem('pms_activeUnit');
        
        // Show undo toast
        toast('Unit deleted. <button onclick="undoDeleteUnit()" style="background:var(--accent);color:#fff;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;margin-left:8px;font-weight:600;">UNDO</button>','warning',30000);
@@ -4654,7 +4678,7 @@ function renderHome(){
     if(cu) userAccess=cu.unitAccess||[];
   }
   var filteredUnits=units.filter(function(u){
-    if(u.id==='default') return isAdminUser;
+    if(!u._dbId) return isAdminUser;
     if(isAdminUser) return true;
     return userAccess.indexOf(u.id)>=0;
   });
@@ -4668,7 +4692,7 @@ function renderHome(){
   html+=`</select>
     </div>
     <button class="btn btn-primary btn-sm" onclick="addUnit()">+ Add Unit</button>
-    ${getActiveUnit()!=='default'?'<button class="btn btn-danger btn-sm" onclick="deleteUnit()">🗑 Delete Unit</button>':''}
+    ${getUnits().length>1?'<button class="btn btn-danger btn-sm" onclick="deleteUnit()">🗑 Delete Unit</button>':''}
     ${getUnits().filter(u=>u.id!==getActiveUnit()).length>0?'<button class="btn btn-secondary btn-sm" onclick="openTransferChutes()" style="margin-left:4px;">⇄ Transfer Chutes</button>':''}
   </div>`;
 
