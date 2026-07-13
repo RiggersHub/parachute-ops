@@ -438,6 +438,7 @@
       <button class="nav-tab active" data-page="home">Home</button>
       <button class="nav-tab" data-page="packlog">Rigger Pack Records</button>
       <button class="nav-tab" data-page="psr">PSR / Overview</button>
+      <button class="nav-tab" data-page="abnplanner">ABN Ops Planner</button>
       <button class="nav-tab" data-page="weekly">Weekly Data Report</button>
       <button class="nav-tab" data-page="archive">Archived Records</button>
       <button class="nav-tab" data-page="ops">Issue &amp; Return</button>
@@ -483,7 +484,12 @@
     </div>
     <div id="psrContent"></div>
   </div>
-  <div id="page-archive" style="display:none;">
+  <div id="page-abnplanner" style="display:none;">
+    <div class="page-header">
+      <h1 class="page-title">✈️ ABN Ops Planner</h1>
+    </div>
+    <div id="abnPlannerContent"></div>
+  </div>
     <div class="page-header"><h1 class="page-title">Archived Records</h1></div>
     <div id="archiveContent"></div>
   </div>
@@ -662,7 +668,7 @@ function populateSystemDropdown(){
   getUnitSystems().forEach(s=>{sel.innerHTML+='<option'+(s===val?' selected':'')+'>'+s+'</option>';});
 }
 
-let S = { sections:[], binLocations:[], knownPackers:[], knownIPs:[], masterInventory:{}, statusCounts:{}, equipmentCounts:{}, mffData:{}, archive:{deletedRows:[],deletedSections:[],monthlyLogs:[]}, nextSectionId:1 };
+let S = { sections:[], binLocations:[], knownPackers:[], knownIPs:[], masterInventory:{}, statusCounts:{}, equipmentCounts:{}, mffData:{}, customCapacity:[], archive:{deletedRows:[],deletedSections:[],monthlyLogs:[]}, nextSectionId:1 };
 
 function getStorageKey(){ return 'pms_data_'+getActiveUnit(); }
 function load(){
@@ -1083,6 +1089,7 @@ document.querySelectorAll('.nav-tab').forEach(tab=>{ tab.addEventListener('click
   document.getElementById(`page-${tab.dataset.page}`).style.display='';
   if(tab.dataset.page==='home') renderHome();
   if(tab.dataset.page==='archive') renderArchive();
+  if(tab.dataset.page==='abnplanner') renderABNPlanner();
   if(tab.dataset.page==='psr') renderPSR();
   if(tab.dataset.page==='weekly') renderWeekly();
   if(tab.dataset.page==='ops') renderOps();
@@ -1452,6 +1459,8 @@ async function loadFromDB() {
       if(extra.capacityRA1) S.capacityRA1=extra.capacityRA1;
       if(extra.capacityRA1R) S.capacityRA1R=extra.capacityRA1R;
       if(extra.capacityRA1DBSL) S.capacityRA1DBSL=extra.capacityRA1DBSL;
+      if(extra.capacityT11RSP) S.capacityT11RSP=extra.capacityT11RSP;
+      if(extra.customCapacity) S.customCapacity=extra.customCapacity;
       if(extra.mffData) S.mffData=extra.mffData;
       // Restore bulk dates — covers both new DB columns and legacy fallback
       if(extra.bulkDates){
@@ -1649,6 +1658,8 @@ async function saveToDB() {
       capacityRA1: S.capacityRA1 || 0,
       capacityRA1R: S.capacityRA1R || 0,
       capacityRA1DBSL: S.capacityRA1DBSL || 0,
+      capacityT11RSP: S.capacityT11RSP || 0,
+      customCapacity: S.customCapacity || [],
       mffData: S.mffData || {},
       bulkDates: S.sections.reduce(function(acc,sec){
         if(sec.bulkPackDate||sec.bulkExpDate) acc[sec.id]={packDate:sec.bulkPackDate||'',expDate:sec.bulkExpDate||''};
@@ -1932,15 +1943,32 @@ function doCreateAccount(){
     err.textContent='Last name already registered';err.style.display='block';return;
   }
 
-  users.push({name:username, lastName:lastName, role:'pending', pin:pin});
+  var newUser={name:username, lastName:lastName, role:'pending', pin:pin};
+  users.push(newUser);
   saveUsers(users);
-  populateLoginDropdown();
 
+  // Push to Supabase so other devices see the new pending account
+  if(sbClient) saveUsersDB(users).then(function(){dbLog('New account saved to DB: '+username);}).catch(function(e){dbLog('Account DB save error: '+e.message);});
+
+  // Post announcement so admins see pending account on home page
+  var announceText='🔔 New account request: '+lastName+' is pending approval.';
+  if(!S.announcements) S.announcements=[];
+  S.announcements.unshift({
+    id:'acct-'+Date.now(),
+    text:announceText,
+    author:'System',
+    ts:new Date().toISOString(),
+    _isPendingAccount:true,
+    _pendingName:lastName
+  });
+  save();
+
+  populateLoginDropdown();
   err.style.display='none';
   showLoginPanel();
   document.getElementById('loginUser').value=lastName;
   document.getElementById('loginPin').value='';
-  document.getElementById('loginError').textContent='Account created! Enter your PIN to sign in.';
+  document.getElementById('loginError').textContent='Account created! An admin will approve your account.';
   document.getElementById('loginError').style.display='block';
   document.getElementById('loginError').style.color='var(--success)';
   setTimeout(function(){document.getElementById('loginError').style.color='';},3000);
@@ -2244,8 +2272,15 @@ function approveUser(userName){
   if(!user){toast('User not found','error');return;}
   user.role='rigger';
   saveUsers(users);
+  if(sbClient) saveUsersDB(users).catch(function(e){dbLog('approveUser DB error: '+e.message);});
+  // Remove the pending announcement for this user
+  if(S.announcements){
+    S.announcements=S.announcements.filter(function(a){return !(a._isPendingAccount&&a._pendingName===userName);});
+    save();
+  }
   auditLog('config','User Approved','Approved user: '+userName);
   renderAdmin();
+  try{renderHome();}catch(e){}
   populateLoginDropdown();
   toast(userName+' approved as rigger','success');
 }
@@ -4349,43 +4384,80 @@ function openTransferChutes(){
   var units=getUnits().filter(function(u){return u.id!==getActiveUnit();});
   if(units.length===0){toast('No other units to transfer to','error');return;}
 
-  var is='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:7px 10px;font-size:12px;font-family:inherit;outline:none;width:100%;box-sizing:border-box;';
-
-  // Build destination unit options
+  var is='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:6px 10px;font-size:12px;font-family:inherit;outline:none;width:100%;box-sizing:border-box;';
   var unitOpts=units.map(function(u){return '<option value="'+u.id+'">'+esc(u.name||u.id)+(u.designation?' ('+esc(u.designation)+')':'')+'</option>';}).join('');
 
-  // Build section rows — both serial-number sections and bulk sections
   var sectionRows='';
+  var anyRows=false;
   S.sections.forEach(function(sec){
-    var available=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&!r._signedOut;}).length+Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
-    if(available===0) return;
-    sectionRows+=`<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:10px;margin-bottom:6px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;">
-      <input type="checkbox" id="txSec-${sec.id}" style="width:16px;height:16px;cursor:pointer;" onchange="document.getElementById('txQty-${sec.id}').disabled=!this.checked;if(this.checked)document.getElementById('txQty-${sec.id}').focus();">
-      <div>
-        <span style="font-weight:600;">${esc(sec.binLocation)}</span>
-        <span style="font-size:11px;color:var(--text-muted);margin-left:8px;">${esc(sec.systemType)}</span>
-      </div>
-      <div style="font-size:11px;color:var(--text-muted);">Avail: <strong style="color:var(--accent);">${available}</strong></div>
-      <input type="number" id="txQty-${sec.id}" min="1" max="${available}" placeholder="Qty" disabled style="width:70px;font-size:13px;text-align:center;${is}opacity:0.5;" onfocus="this.style.opacity='1';">
-    </div>`;
+    // Packed (RFI)
+    var packed=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&!r._signedOut;}).length+Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
+    // Unpacked rows
+    var unpacked=sec.rows.filter(function(r){return !r.packer||!r.serialNumber;}).length;
+    if(packed===0&&unpacked===0) return;
+    anyRows=true;
+
+    sectionRows+=`<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+        <span style="font-weight:700;font-size:13px;">${esc(sec.binLocation)}</span>
+        <span class="badge badge-${sec.systemType.toLowerCase().replace(/[\s\/]/g,'-')}" style="font-size:10px;">${esc(sec.systemType)}</span>
+      </div>`;
+
+    if(packed>0){
+      sectionRows+=`<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--border);">
+        <input type="checkbox" id="txP-${sec.id}" onchange="var q=document.getElementById('txPQ-${sec.id}');q.disabled=!this.checked;if(this.checked)q.focus();" style="width:15px;height:15px;cursor:pointer;">
+        <div style="font-size:12px;">RFI (Packed) <span style="color:var(--success);font-weight:600;">${packed} avail</span></div>
+        <label style="font-size:10px;color:var(--text-muted);">Qty</label>
+        <input type="number" id="txPQ-${sec.id}" min="1" max="${packed}" placeholder="#" disabled style="width:60px;text-align:center;${is}opacity:0.5;" onfocus="this.style.opacity='1';">
+      </div>`;
+    }
+
+    if(unpacked>0){
+      sectionRows+=`<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--border);">
+        <input type="checkbox" id="txU-${sec.id}" onchange="var q=document.getElementById('txUQ-${sec.id}');q.disabled=!this.checked;if(this.checked)q.focus();" style="width:15px;height:15px;cursor:pointer;">
+        <div style="font-size:12px;">Unpacked <span style="color:var(--warning);font-weight:600;">${unpacked} avail</span></div>
+        <label style="font-size:10px;color:var(--text-muted);">Qty</label>
+        <input type="number" id="txUQ-${sec.id}" min="1" max="${unpacked}" placeholder="#" disabled style="width:60px;text-align:center;${is}opacity:0.5;" onfocus="this.style.opacity='1';">
+      </div>`;
+    }
+
+    sectionRows+=`</div>`;
   });
 
-  if(!sectionRows){toast('No chutes available to transfer','warning');return;}
+  if(!anyRows){toast('No chutes available to transfer','warning');return;}
 
-  var html=`<div style="text-align:left;">
-    <div style="margin-bottom:12px;">
-      <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:4px;">Transfer To</label>
-      <select id="txDestUnit" style="${is}">${unitOpts}</select>
-    </div>
-    <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:8px;">Select Sections to Transfer</div>
-    ${sectionRows}
-    <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">Bulk sections transfer by quantity. Serial-number sections transfer the oldest-packed chutes first.</div>
-  </div>`;
+  // Build as a custom full-screen modal (not showConfirm) so it scrolls and has a close button
+  var overlay=document.createElement('div');
+  overlay.id='transferOverlay';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:10002;display:flex;align-items:center;justify-content:center;padding:16px;';
 
-  showConfirm('⇄ Transfer Chutes', html, [
-    {label:'Cancel',cls:'btn-secondary',fn:function(){}},
-    {label:'Transfer',cls:'btn-primary',fn:function(){ executeTransfer(); }}
-  ]);
+  overlay.innerHTML=`
+    <div style="background:var(--bg-card);border-radius:12px;width:100%;max-width:600px;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,0.4);">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:16px 20px;border-bottom:1px solid var(--border);flex-shrink:0;">
+        <div style="font-size:16px;font-weight:700;">⇄ Transfer Chutes</div>
+        <button onclick="document.getElementById('transferOverlay').remove()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:20px;line-height:1;padding:4px;">✕</button>
+      </div>
+      <div style="padding:16px 20px;overflow-y:auto;flex:1;">
+        <div style="margin-bottom:14px;">
+          <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:4px;">Transfer To</label>
+          <select id="txDestUnit" style="${is}">${unitOpts}</select>
+        </div>
+        <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:10px;">Select Bins &amp; Chute Type</div>
+        ${sectionRows}
+        <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">Check the bins and types you want to transfer and enter the quantity for each.</div>
+      </div>
+      <div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;gap:10px;justify-content:flex-end;flex-shrink:0;">
+        <button class="btn btn-secondary" onclick="document.getElementById('transferOverlay').remove()">Cancel</button>
+        <button class="btn btn-primary" onclick="executeTransfer()">Transfer</button>
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+
+  // Close on backdrop click
+  overlay.addEventListener('click',function(e){
+    if(e.target===overlay) overlay.remove();
+  });
 }
 
 async function executeTransfer(){
@@ -4396,21 +4468,20 @@ async function executeTransfer(){
   if(!destUnits.length){toast('Destination unit not found','error');return;}
   var destUnit=destUnits[0];
 
-  // Collect selected sections and quantities
+  // Collect selections — packed and unpacked separately per section
   var transfers=[];
   S.sections.forEach(function(sec){
-    var cb=document.getElementById('txSec-'+sec.id);
-    var qtyEl=document.getElementById('txQty-'+sec.id);
-    if(!cb||!cb.checked) return;
-    var qty=parseInt((qtyEl||{}).value)||0;
-    var available=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&!r._signedOut;}).length+Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
-    if(qty<=0||qty>available){toast('Invalid quantity for '+sec.binLocation,'error');return;}
-    transfers.push({sec:sec,qty:qty});
+    var cbP=document.getElementById('txP-'+sec.id);
+    var cbU=document.getElementById('txU-'+sec.id);
+    var qtyP=parseInt((document.getElementById('txPQ-'+sec.id)||{}).value)||0;
+    var qtyU=parseInt((document.getElementById('txUQ-'+sec.id)||{}).value)||0;
+    if(cbP&&cbP.checked&&qtyP>0) transfers.push({sec:sec,qty:qtyP,type:'packed'});
+    if(cbU&&cbU.checked&&qtyU>0) transfers.push({sec:sec,qty:qtyU,type:'unpacked'});
   });
 
-  if(transfers.length===0){toast('Select at least one section and quantity','error');return;}
+  if(transfers.length===0){toast('Select at least one bin and quantity','error');return;}
 
-  // Load destination unit's data from localStorage
+  // Load destination unit data
   var destStorageKey='pms_data_'+destUnitId;
   var destS=null;
   try{ destS=JSON.parse(localStorage.getItem(destStorageKey)||'null'); }catch(e){}
@@ -4423,75 +4494,71 @@ async function executeTransfer(){
   transfers.forEach(function(t){
     var sec=t.sec;
     var qty=t.qty;
-    var isBulk=(parseInt(sec.bulkCount)||0)>0&&sec.rows.filter(function(r){return r.serialNumber;}).length===0;
 
-    // Build a matching section in destination (same bin name + system)
+    // Find or create matching section in destination
     var destSec=destS.sections.find(function(s){return s.binLocation===sec.binLocation&&s.systemType===sec.systemType;});
     if(!destSec){
-      destSec={
-        id:(destS.nextSectionId||1),
-        binLocation:sec.binLocation,
-        systemType:sec.systemType,
-        maxChutes:sec.maxChutes,
-        bulkCount:0,
-        _bulkSignedOut:0,
-        bulkPackDate:sec.bulkPackDate||'',
-        bulkExpDate:sec.bulkExpDate||'',
-        rows:[]
-      };
+      destSec={id:(destS.nextSectionId||1),binLocation:sec.binLocation,systemType:sec.systemType,maxChutes:sec.maxChutes,bulkCount:0,_bulkSignedOut:0,bulkPackDate:sec.bulkPackDate||'',bulkExpDate:sec.bulkExpDate||'',rows:[]};
       destS.sections.push(destSec);
       destS.nextSectionId=(destS.nextSectionId||1)+1;
     }
 
-    if(isBulk){
-      // Bulk transfer: just move the count
-      var available=Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
-      var moving=Math.min(qty,available);
-      sec.bulkCount=Math.max(0,(parseInt(sec.bulkCount)||0)-moving);
-      destSec.bulkCount=(parseInt(destSec.bulkCount)||0)+moving;
-      destSec.bulkPackDate=destSec.bulkPackDate||sec.bulkPackDate||'';
-      destSec.bulkExpDate=destSec.bulkExpDate||sec.bulkExpDate||'';
-      totalMoved+=moving;
-      summary.push(moving+' '+sec.systemType+' ('+sec.binLocation+') bulk');
+    if(t.type==='packed'){
+      // Handle bulk sections
+      var isBulk=(parseInt(sec.bulkCount)||0)>0&&sec.rows.filter(function(r){return r.serialNumber;}).length===0;
+      if(isBulk){
+        var avail=Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
+        var moving=Math.min(qty,avail);
+        sec.bulkCount=Math.max(0,(parseInt(sec.bulkCount)||0)-moving);
+        destSec.bulkCount=(parseInt(destSec.bulkCount)||0)+moving;
+        destSec.bulkPackDate=destSec.bulkPackDate||sec.bulkPackDate||'';
+        destSec.bulkExpDate=destSec.bulkExpDate||sec.bulkExpDate||'';
+        totalMoved+=moving;
+        summary.push(moving+' '+sec.systemType+' packed ('+sec.binLocation+')');
+      } else {
+        // Serial number rows — oldest packed first
+        var packedRows=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&!r._signedOut;});
+        packedRows.sort(function(a,b){return (a.packDate||'').localeCompare(b.packDate||'');});
+        var toMove=packedRows.slice(0,qty);
+        toMove.forEach(function(row){
+          var idx=sec.rows.indexOf(row);
+          if(idx>-1) sec.rows.splice(idx,1);
+          destSec.rows.push(Object.assign({},row,{_dbId:undefined}));
+          if(row.serialNumber&&destS.masterInventory) destS.masterInventory[row.serialNumber]=S.masterInventory?.[row.serialNumber]||{};
+        });
+        totalMoved+=toMove.length;
+        summary.push(toMove.length+' '+sec.systemType+' packed S/N ('+sec.binLocation+')');
+      }
     } else {
-      // Serial number transfer: move oldest-packed rows first
-      var packedRows=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&!r._signedOut;});
-      packedRows.sort(function(a,b){return (a.packDate||'').localeCompare(b.packDate||'');});
-      var toMove=packedRows.slice(0,qty);
-      toMove.forEach(function(row){
-        // Remove from source
+      // Unpacked rows — rows missing packer or serial
+      var unpackedRows=sec.rows.filter(function(r){return !r.packer||!r.serialNumber;});
+      var toMoveU=unpackedRows.slice(0,qty);
+      toMoveU.forEach(function(row){
         var idx=sec.rows.indexOf(row);
         if(idx>-1) sec.rows.splice(idx,1);
-        // Add to destination
         destSec.rows.push(Object.assign({},row,{_dbId:undefined}));
-        // Transfer master inventory entry
-        if(row.serialNumber&&destS.masterInventory){
-          destS.masterInventory[row.serialNumber]=S.masterInventory?.[row.serialNumber]||{};
-        }
       });
-      totalMoved+=toMove.length;
-      summary.push(toMove.length+' '+sec.systemType+' ('+sec.binLocation+')');
+      totalMoved+=toMoveU.length;
+      summary.push(toMoveU.length+' '+sec.systemType+' unpacked ('+sec.binLocation+')');
     }
   });
 
   if(totalMoved===0){toast('Nothing was transferred','warning');return;}
 
-  // Save source (current unit)
-  save();
+  // Close the modal
+  var overlay=document.getElementById('transferOverlay');
+  if(overlay) overlay.remove();
 
-  // Save destination unit to localStorage
+  save();
   localStorage.setItem(destStorageKey, JSON.stringify(destS));
 
-  // Push destination to Supabase if connected
   if(sbClient&&destUnit._dbId){
     try{
       var prevActiveUnitId=activeUnitId;
       var prevS=JSON.parse(JSON.stringify(S));
-      // Temporarily switch context to dest unit to save
       activeUnitId=destUnit._dbId;
       S=destS;
       await saveToDB();
-      // Restore source context
       activeUnitId=prevActiveUnitId;
       S=prevS;
     }catch(e){ dbLog('Transfer dest save error: '+e.message); }
@@ -4501,8 +4568,7 @@ async function executeTransfer(){
   save();
   renderSections();
   renderHome();
-  renderPSR();
-
+  try{renderPSR();}catch(e){}
   toast('✓ Transferred '+totalMoved+' chutes to '+(destUnit.name||destUnit.id),'success',5000);
 }
 
@@ -5011,248 +5077,91 @@ function renderPSR(){
     (S.statusCounts[sys]?.maintenance||[]).forEach(e=>actualRA1DBSL+=(parseInt(e.count)||0));
   });
 
-  const capT11=S.capacityT11||0, capT11R=S.capacityT11R||0, capMC6=S.capacityMC6||0, capRA1=S.capacityRA1||0, capRA1R=S.capacityRA1R||0, capRA1DBSL=S.capacityRA1DBSL||0;
-  const totalCap=capT11+capT11R+capMC6+capRA1+capRA1R+capRA1DBSL;
-  const totalActual=actualT11+actualT11R+actualMC6+actualRA1+actualRA1R+actualRA1DBSL;
-  const diffT11=actualT11-capT11, diffT11R=actualT11R-capT11R, diffMC6=actualMC6-capMC6, diffRA1=actualRA1-capRA1, diffRA1R=actualRA1R-capRA1R, diffRA1DBSL=actualRA1DBSL-capRA1DBSL;
-  const totalDiff=totalActual-totalCap;
+  const capT11=S.capacityT11||0, capT11R=S.capacityT11R||0, capT11RSP=S.capacityT11RSP||0, capMC6=S.capacityMC6||0, capRA1=S.capacityRA1||0, capRA1R=S.capacityRA1R||0, capRA1DBSL=S.capacityRA1DBSL||0;
+  if(!S.customCapacity) S.customCapacity=[];
+  const customCaps=S.customCapacity||[];
+  let customCapTotal=customCaps.reduce(function(a,cc){return a+(parseInt(cc.cap)||0);},0);
+  let customActTotal=0;
+  customCaps.forEach(function(cc){S.sections.forEach(function(s){if(s.systemType===cc.sys) customActTotal+=countRealRows(s)+(parseInt(s.bulkCount)||0);});});
+  // T-11R SP actual
+  let actualT11RSP=0; S.sections.forEach(function(s){if(s.systemType==='T-11R SP') actualT11RSP+=countRealRows(s)+(parseInt(s.bulkCount)||0);});
+  const totalCap=capT11+capT11R+capT11RSP+capMC6+capRA1+capRA1R+capRA1DBSL+customCapTotal;
+  const totalActual=actualT11+actualT11R+actualT11RSP+actualMC6+actualRA1+actualRA1R+actualRA1DBSL+customActTotal;
+  const diffT11=actualT11-capT11, diffT11R=actualT11R-capT11R, diffT11RSP=actualT11RSP-capT11RSP, diffMC6=actualMC6-capMC6, diffRA1=actualRA1-capRA1, diffRA1R=actualRA1R-capRA1R, diffRA1DBSL=actualRA1DBSL-capRA1DBSL;
 
   const inputStyle='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;font-weight:600;width:55px;text-align:center;outline:none;font-family:inherit;padding:3px;';
   const diffStyle=(d)=>`font-size:11px;font-weight:700;margin-top:2px;color:${d===0?'var(--success)':'var(--danger)'}`;
 
-  // Total Capacity — full-width card on its own row
+  function onHandBox(label,actual,cap,onch){
+    const d=actual-cap;
+    return `<div style="text-align:center;">
+      <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:2px;">${actual}</div>
+      <input type="number" value="${cap||''}" placeholder="#" onchange="${onch}" style="${inputStyle}">
+      <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">${label}</div>
+      <div style="${diffStyle(d)}">${d<0?d:d===0?'✓':'+'+d}</div>
+    </div>`;
+  }
+
+  // Total On Hand — full-width card on its own row
   html+=`<div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:12px;text-align:center;">
     <div style="font-size:28px;font-weight:700;color:var(--accent);">${totalCap}</div>
-    <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">Total Capacity</div>
+    <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">Total On Hand</div>
     <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
-      <div style="text-align:center;">
-        <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:2px;">${actualT11}</div>
-        <input type="number" value="${capT11||''}" placeholder="#" onchange="S.capacityT11=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
-        <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">T-11</div>
-        <div style="${diffStyle(diffT11)}">${diffT11<0?diffT11:diffT11===0?'✓':'+'+diffT11}</div>
-      </div>
-      <div style="text-align:center;">
-        <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:2px;">${actualT11R}</div>
-        <input type="number" value="${capT11R||''}" placeholder="#" onchange="S.capacityT11R=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
-        <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">T-11R</div>
-        <div style="${diffStyle(diffT11R)}">${diffT11R<0?diffT11R:diffT11R===0?'✓':'+'+diffT11R}</div>
-      </div>
-      <div style="text-align:center;">
-        <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:2px;">${actualMC6}</div>
-        <input type="number" value="${capMC6||''}" placeholder="#" onchange="S.capacityMC6=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
-        <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">MC-6</div>
-        <div style="${diffStyle(diffMC6)}">${diffMC6<0?diffMC6:diffMC6===0?'✓':'+'+diffMC6}</div>
-      </div>
-      <div style="text-align:center;">
-        <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:2px;">${actualRA1}</div>
-        <input type="number" value="${capRA1||''}" placeholder="#" onchange="S.capacityRA1=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
-        <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">RA-1</div>
-        <div style="${diffStyle(diffRA1)}">${diffRA1<0?diffRA1:diffRA1===0?'✓':'+'+diffRA1}</div>
-      </div>
-      <div style="text-align:center;">
-        <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:2px;">${actualRA1R}</div>
-        <input type="number" value="${capRA1R||''}" placeholder="#" onchange="S.capacityRA1R=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
-        <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">RA-1R</div>
-        <div style="${diffStyle(diffRA1R)}">${diffRA1R<0?diffRA1R:diffRA1R===0?'✓':'+'+diffRA1R}</div>
-      </div>
-      <div style="text-align:center;">
-        <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:2px;">${actualRA1DBSL}</div>
-        <input type="number" value="${capRA1DBSL||''}" placeholder="#" onchange="S.capacityRA1DBSL=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
-        <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">RA-1 DBSL</div>
-        <div style="${diffStyle(diffRA1DBSL)}">${diffRA1DBSL<0?diffRA1DBSL:diffRA1DBSL===0?'✓':'+'+diffRA1DBSL}</div>
+      ${onHandBox('T-11',actualT11,capT11,"S.capacityT11=parseInt(this.value)||0;save();renderPSR();")}
+      ${onHandBox('T-11R',actualT11R,capT11R,"S.capacityT11R=parseInt(this.value)||0;save();renderPSR();")}
+      ${onHandBox('T-11R SP',actualT11RSP,capT11RSP,"S.capacityT11RSP=parseInt(this.value)||0;save();renderPSR();")}
+      ${onHandBox('MC-6',actualMC6,capMC6,"S.capacityMC6=parseInt(this.value)||0;save();renderPSR();")}
+      ${onHandBox('RA-1',actualRA1,capRA1,"S.capacityRA1=parseInt(this.value)||0;save();renderPSR();")}
+      ${onHandBox('RA-1R',actualRA1R,capRA1R,"S.capacityRA1R=parseInt(this.value)||0;save();renderPSR();")}
+      ${onHandBox('RA-1 DBSL',actualRA1DBSL,capRA1DBSL,"S.capacityRA1DBSL=parseInt(this.value)||0;save();renderPSR();")}
+      ${customCaps.map(function(cc,ci){
+        let ccAct=0; S.sections.forEach(function(s){if(s.systemType===cc.sys) ccAct+=countRealRows(s)+(parseInt(s.bulkCount)||0);});
+        return `<div style="text-align:center;">
+          <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:2px;">${ccAct}</div>
+          <input type="number" value="${cc.cap||''}" placeholder="#" onchange="S.customCapacity[${ci}].cap=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
+          <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">${esc(cc.sys)}</div>
+          <div style="${diffStyle(ccAct-(parseInt(cc.cap)||0))}">${(ccAct-(parseInt(cc.cap)||0))<0?(ccAct-(parseInt(cc.cap)||0)):(ccAct-(parseInt(cc.cap)||0))===0?'✓':'+'+(ccAct-(parseInt(cc.cap)||0))}</div>
+          <button onclick="S.customCapacity.splice(${ci},1);save();renderPSR();" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:10px;margin-top:2px;">✕</button>
+        </div>`;
+      }).join('')}
+      <div style="text-align:center;display:flex;align-items:center;">
+        <button onclick="addCustomCapacity()" style="background:none;border:1px dashed var(--accent);border-radius:6px;color:var(--accent);cursor:pointer;font-size:11px;padding:6px 10px;line-height:1.4;">+ Add<br>System</button>
       </div>
     </div>
   </div>`;
 
   // Remaining stat cards in their own grid row
   html+=`<div class="psr-summary">
-    <div class="psr-stat"><div class="psr-stat-value">${totalChutes}</div><div class="psr-stat-label">Total Chutes Packed</div></div>
-    <div class="psr-stat warning"><div class="psr-stat-value">${totalPopped}</div><div class="psr-stat-label">Total Popped</div></div>
+    <div class="psr-stat"><div class="psr-stat-value">${totalChutes}</div><div class="psr-stat-label">Total RFI</div></div>
+    <div class="psr-stat warning"><div class="psr-stat-value">${totalPopped}</div><div class="psr-stat-label">Total Unpacked</div></div>
     <div class="psr-stat ${expiring7>0?'danger':'success'}"><div class="psr-stat-value">${expiring7}</div><div class="psr-stat-label">Expiring ≤ 7 Days</div></div>
     <div class="psr-stat ${expiring30>0?'warning':'success'}"><div class="psr-stat-value">${expiring30}</div><div class="psr-stat-label">Expiring ≤ 30 Days</div></div>
     <div class="psr-stat warning"><div class="psr-stat-value">${totalMaint}</div><div class="psr-stat-label">In Maintenance</div></div>
-    <div class="psr-stat"><div class="psr-stat-value">${totalSignedOut}</div><div class="psr-stat-label">Signed Out</div></div>
   </div>`;
 
-  // ── Signed Out Chutes ──
-  html+=`<div class="psr-section">
-    <div class="psr-section-title">📋 Signed Out Chutes <span style="font-size:10px;color:var(--text-muted);font-weight:400;margin-left:8px;">Manage sign-outs in Issue &amp; Return</span></div>`;
-  var activeSignedOut=(S.signedOut||[]).filter(function(s){return s.status==='out';});
-  if(activeSignedOut.length>0){
-    html+=`<table class="psr-table"><thead><tr><th>Unit</th><th>System</th><th>Qty</th><th>Date</th><th></th></tr></thead><tbody>`;
-    (S.signedOut||[]).forEach(function(so,i){
-      if(so.status!=='out') return;
-      var scannedCount=(so.scannedOut||[]).length;
-      var qty=scannedCount>0?scannedCount:(parseInt(so.count)||so.totalQty||0);
-      html+='<tr><td><strong>'+esc(so.unit||'')+'</strong></td><td>'+esc(so.system||'')+'</td><td><strong>'+qty+'</strong></td><td>'+(so.date||'')+'</td><td><button class="row-action-btn delete" onclick="delSignedOut('+i+')" title="Remove">🗑</button></td></tr>';
-    });
-    html+='</tbody></table>';
-  } else {
-    html+=`<div style="color:var(--text-muted);font-size:12px;padding:8px;">No chutes currently signed out. Use Issue &amp; Return to sign out chutes.</div>`;
-  }
-  html+=`</div>`;
-
-  // ── Airborne Operations (ABN Op) ──
-  if(!S.abnOps) S.abnOps=[];
-
-  // Calculate expiring chutes by month (next 6 months) - only months with expirations
-  const expiringByMonth={};
-  let totalExpiringAll=0;
-  for(let m=0;m<6;m++){
-    const mStart=new Date(now.getFullYear(), now.getMonth()+m, 1);
-    const mEnd=new Date(now.getFullYear(), now.getMonth()+m+1, 0);
-    const mKey=getMonthLabel(mStart);
-    let cnt=0;
-    S.sections.forEach(sec=>sec.rows.forEach(r=>{
-      if(r.expirationDate){
-        const exp=new Date(r.expirationDate+'T00:00:00');
-        if(exp>=mStart && exp<=mEnd) cnt++;
-      }
-    }));
-    if(cnt>0) expiringByMonth[mKey]=cnt;
-    totalExpiringAll+=cnt;
-  }
-
-  // ABN Op requested totals
-  let totalRequested=0;
-  S.abnOps.forEach(op=>totalRequested+=(parseInt(op.requested)||0));
-
-  // Available calculation
-  const availableChutes=totalChutes - totalExpiringAll - totalMaint;
-  const surplus=availableChutes - totalRequested;
-
-  html+=`<div class="psr-section">
-    <div class="psr-section-title">✈️ Airborne Operations (ABN Op) <button class="btn btn-sm btn-secondary" onclick="addAbnOp()" style="margin-left:8px;">+ Add Op</button></div>`;
-
-  // Ops table FIRST
-  if(S.abnOps.length>0){
-    html+=`<table class="psr-table" style="margin-bottom:16px;"><thead><tr><th>Operation</th><th>System</th><th>Date</th><th>Requested</th><th></th></tr></thead><tbody>`;
-    S.abnOps.forEach((op,i)=>{
-      let sysOpts='<option value="">--</option>';
-      ['T-11','T-11R','T-11R SP','MC-6','RA-1','RA-1R','RA-1 DBSL'].forEach(s=>{
-        sysOpts+=`<option value="${s}" ${op.system===s?'selected':''}>${s}</option>`;
-      });
-      html+=`<tr>
-        <td><input type="text" value="${esc(op.name)}" placeholder="Op name" onchange="updAbnOp(${i},'name',this.value)" style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:4px 8px;font-size:12px;width:100%;outline:none;font-family:inherit;"></td>
-        <td style="width:110px;"><select onchange="updAbnOp(${i},'system',this.value)" style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:4px 6px;font-size:12px;outline:none;font-family:inherit;width:100%;">${sysOpts}</select></td>
-        <td style="width:130px;"><input type="date" value="${op.date||''}" onchange="updAbnOp(${i},'date',this.value)" style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:4px 8px;font-size:12px;color-scheme:dark;outline:none;font-family:inherit;"></td>
-        <td style="width:90px;"><input type="number" value="${op.requested||''}" min="0" placeholder="#" onchange="updAbnOp(${i},'requested',this.value)" style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:4px 8px;font-size:12px;width:70px;text-align:center;outline:none;font-family:inherit;"></td>
-        <td style="width:40px;"><button class="row-action-btn delete" onclick="delAbnOp(${i})" title="Remove">🗑</button></td>
-      </tr>`;
-    });
-    html+=`<tr style="border-top:2px solid var(--border);"><td><strong>TOTAL</strong></td><td></td><td></td><td><strong>${totalRequested}</strong></td><td></td></tr>`;
-    html+=`</tbody></table>`;
-  } else {
-    html+=`<div style="color:var(--text-muted);font-size:12px;padding:8px 0 16px;">No operations scheduled. Click + Add Op to track.</div>`;
-  }
-
-  // Calculation + expiring side by side below
-  const hasExpiring=Object.keys(expiringByMonth).length>0;
-  html+=`<div style="display:grid;grid-template-columns:${hasExpiring?'1fr 1fr':'1fr'};gap:16px;">`;
-
-  // Availability Calculation
-  // Per-system availability
-  var sysList=['T-11','T-11R','MC-6','RA-1','RA-1R','RA-1 DBSL'];
-  var sysAvail={};
-  var nowDate=new Date();
-  var curMonth=nowDate.getMonth();
-  var curYear=nowDate.getFullYear();
-  sysList.forEach(function(sys){
-    var packed=0,expiringThisMonth=0,signedOut=0,requested=0;
-    S.sections.forEach(function(sec){
-      // T-11R bucket: T-11R and T-11R SP
-      var match=(sys==='T-11R')?(sec.systemType==='T-11R'||sec.systemType==='T-11R SP'):(sec.systemType===sys);
-      if(!match) return;
-      packed+=Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
-      sec.rows.forEach(function(r){
-        if(r.serialNumber&&r.packer&&r.ip&&!r._signedOut&&!r._popped) packed++;
-        if(r.expirationDate&&!r._signedOut&&!r._popped){
-          var d=new Date(r.expirationDate+'T00:00:00');
-          if(d.getMonth()===curMonth&&d.getFullYear()===curYear) expiringThisMonth++;
-        }
-      });
-      // Check bulk count expiration
-      if(sec.bulkExpDate&&(parseInt(sec.bulkCount)||0)>0){
-        var bd=new Date(sec.bulkExpDate+'T00:00:00');
-        if(bd.getMonth()===curMonth&&bd.getFullYear()===curYear) expiringThisMonth+=(parseInt(sec.bulkCount)||0);
-      }
-    });
-    (S.signedOut||[]).forEach(function(so){
-      if(so.status!=='out'||so._requestId) return;
-      var soSys=(so.system||'').trim();
-      var sysMatch=(sys==='T-11R')?(soSys==='T-11R'||soSys==='T-11R SP'):(soSys===sys);
-      if(sysMatch) signedOut+=parseInt(so.count)||0;
-    });
-    (S.abnOps||[]).forEach(function(op){
-      var opSys=(op.system||'').trim();
-      var sysMatch=(sys==='T-11R')?(opSys==='T-11R'||opSys==='T-11R SP'):(opSys===sys);
-      if(sysMatch) requested+=parseInt(op.requested)||0;
-    });
-    sysAvail[sys]={packed:packed,expiring:expiringThisMonth,signedOut:signedOut,requested:requested,
-      available:packed-requested-expiringThisMonth};
-  });
-  
-  html+=`<div>
-    <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:8px;">Availability Calculation</div>
-    <table class="psr-table"><thead><tr><th></th>`;
-  sysList.forEach(function(sys){html+=`<th style="text-align:right;">${sys}</th>`;});
-  html+=`<th style="text-align:right;">TOTAL</th></tr></thead><tbody>`;
-  
-  // Packed row
-  html+='<tr><td>Packed</td>';
-  var totalP=0;
-  sysList.forEach(function(sys){totalP+=sysAvail[sys].packed;html+='<td style="text-align:right;"><strong>'+sysAvail[sys].packed+'</strong></td>';});
-  html+='<td style="text-align:right;"><strong>'+totalP+'</strong></td></tr>';
-  
-  // Requested (ABN Ops) row
-  html+='<tr><td>Requested (ABN Ops)</td>';
-  var totalReq=0;
-  sysList.forEach(function(sys){totalReq+=sysAvail[sys].requested;html+='<td style="text-align:right;">'+sysAvail[sys].requested+'</td>';});
-  html+='<td style="text-align:right;">'+totalReq+'</td></tr>';
-  
-  // Signed Out row
-  html+='<tr><td>Signed Out</td>';
-  var totalSO=0;
-  sysList.forEach(function(sys){totalSO+=sysAvail[sys].signedOut;html+='<td style="text-align:right;">'+sysAvail[sys].signedOut+'</td>';});
-  html+='<td style="text-align:right;">'+totalSO+'</td></tr>';
-  
-  // Expiring current month row
-  var monthNames=['January','February','March','April','May','June','July','August','September','October','November','December'];
-  html+='<tr><td>Expiring '+monthNames[curMonth]+'</td>';
-  var totalE=0;
-  sysList.forEach(function(sys){totalE+=sysAvail[sys].expiring;html+='<td style="text-align:right;" class="exp-30">'+sysAvail[sys].expiring+'</td>';});
-  html+='<td style="text-align:right;" class="exp-30">'+totalE+'</td></tr>';
-  
-  // Available row
-  html+='<tr style="border-top:2px solid var(--border);"><td><strong>Available</strong></td>';
-  var totalA=0;
-  sysList.forEach(function(sys){
-    var a=sysAvail[sys].available;
-    totalA+=a;
-    html+='<td style="text-align:right;"><strong class="'+(a<0?'exp-expired':'')+'">'+a+'</strong></td>';
-  });
-  html+='<td style="text-align:right;"><strong class="'+(totalA<0?'exp-expired':'')+'">'+totalA+'</strong></td></tr>';
-  
-  html+=`</tbody></table>
-  </div>`;
-
-  // Expiring chutes - only show if there are any
-  if(hasExpiring){
-    html+=`<div>
-      <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.3px;margin-bottom:8px;">Chutes Expiring</div>
-      <table class="psr-table"><thead><tr><th>Month</th><th>Expiring</th></tr></thead><tbody>`;
-    Object.entries(expiringByMonth).forEach(([month,cnt])=>{
-      html+=`<tr><td>${month}</td><td class="exp-30"><strong>${cnt}</strong></td></tr>`;
-    });
-    if(Object.keys(expiringByMonth).length>1){
-      html+=`<tr style="border-top:2px solid var(--border);"><td><strong>TOTAL</strong></td><td><strong class="exp-30">${totalExpiringAll}</strong></td></tr>`;
+  // ── Unpacked Chutes by System ──
+  const unpackedBySystem={};
+  S.sections.forEach(sec=>{
+    const unpacked=sec.rows.filter(r=>(!r.serialNumber||!r.packer)).length;
+    if(unpacked>0){
+      if(!unpackedBySystem[sec.systemType]) unpackedBySystem[sec.systemType]={total:0,bins:[]};
+      unpackedBySystem[sec.systemType].total+=unpacked;
+      unpackedBySystem[sec.systemType].bins.push({bin:sec.binLocation,count:unpacked});
     }
-    html+=`</tbody></table></div>`;
-  }
+  });
+  // Also add status counts popped entries as unpacked
+  STATUS_SYS.forEach(sys=>{
+    (S.statusCounts[sys]?.popped||[]).forEach(e=>{
+      const cnt=parseInt(e.count)||0;
+      if(cnt>0){
+        if(!unpackedBySystem[sys]) unpackedBySystem[sys]={total:0,bins:[]};
+        unpackedBySystem[sys].total+=cnt;
+        unpackedBySystem[sys].bins.push({bin:e.bin||'Tracker',count:cnt});
+      }
+    });
+  });
 
-  html+=`</div></div>`;
-
-  // ── Packed & Popped Chutes by System (side by side) ──
+  // ── RFI and Unpacked side by side ──
   const packedBySystem={};
   S.sections.forEach(sec=>{
     if(!packedBySystem[sec.systemType]) packedBySystem[sec.systemType]=0;
@@ -5260,40 +5169,37 @@ function renderPSR(){
     packedBySystem[sec.systemType]+=packedRows.length+Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
   });
 
-  let hasPopped=false;
-  STATUS_SYS.forEach(sys=>{
-    const entries=(S.statusCounts[sys]?.popped||[]).filter(e=>e.bin||parseInt(e.count));
-    if(entries.length>0) hasPopped=true;
-  });
+  const hasUnpacked=Object.keys(unpackedBySystem).length>0;
+  const hasPacked=Object.keys(packedBySystem).filter(s=>packedBySystem[s]>0).length>0;
 
-  const hasPacked=Object.keys(packedBySystem).length>0;
-
-  if(hasPacked||hasPopped){
-    html+=`<div style="display:grid;grid-template-columns:${hasPacked&&hasPopped?'1fr 1fr':'1fr'};gap:16px;">`;
+  if(hasPacked||hasUnpacked){
+    html+=`<div style="display:grid;grid-template-columns:${hasPacked&&hasUnpacked?'1fr 1fr':'1fr'};gap:16px;">`;
 
     if(hasPacked){
       html+=`<div class="psr-section">
-        <div class="psr-section-title">📦 Packed Chutes by System</div>
+        <div class="psr-section-title">✅ RFI Chutes by System</div>
         <table class="psr-table"><thead><tr><th>System</th><th>Qty</th></tr></thead><tbody>`;
       Object.keys(packedBySystem).sort().forEach(sys=>{
-        html+=`<tr><td><strong>${sys}</strong></td><td><strong>${packedBySystem[sys]}</strong></td></tr>`;
+        if(packedBySystem[sys]>0) html+=`<tr><td><strong>${sys}</strong></td><td><strong>${packedBySystem[sys]}</strong></td></tr>`;
       });
       html+=`<tr style="border-top:2px solid var(--border);"><td><strong>TOTAL</strong></td><td><strong>${totalChutes}</strong></td></tr>`;
       html+=`</tbody></table></div>`;
     }
 
-    if(hasPopped){
+    if(hasUnpacked){
+      let unpackedGrandTotal=0;
       html+=`<div class="psr-section">
-        <div class="psr-section-title">🪂 Popped Chutes by System</div>
-        <table class="psr-table"><thead><tr><th>System</th><th>Qty</th></tr></thead><tbody>`;
-      STATUS_SYS.forEach(sys=>{
-        const entries=(S.statusCounts[sys]?.popped||[]).filter(e=>e.bin||parseInt(e.count));
-        if(entries.length===0) return;
-        let sysTotal=0;
-        entries.forEach(e=>sysTotal+=(parseInt(e.count)||0));
-        html+=`<tr><td><strong>${sys}</strong></td><td><strong>${sysTotal}</strong></td></tr>`;
+        <div class="psr-section-title">📦 Unpacked Chutes by System</div>
+        <table class="psr-table"><thead><tr><th>System</th><th>Bin</th><th>Qty</th></tr></thead><tbody>`;
+      Object.keys(unpackedBySystem).sort().forEach(sys=>{
+        const u=unpackedBySystem[sys];
+        unpackedGrandTotal+=u.total;
+        u.bins.forEach(function(b,bi){
+          html+=`<tr><td>${bi===0?'<strong>'+sys+'</strong>':''}</td><td>${esc(b.bin)}</td><td>${b.count}</td></tr>`;
+        });
+        if(u.bins.length>1) html+=`<tr style="border-top:1px dashed var(--border);"><td></td><td><em>subtotal</em></td><td><strong>${u.total}</strong></td></tr>`;
       });
-      html+=`<tr style="border-top:2px solid var(--border);"><td><strong>TOTAL</strong></td><td><strong>${totalPopped}</strong></td></tr>`;
+      html+=`<tr style="border-top:2px solid var(--border);"><td><strong>TOTAL</strong></td><td></td><td><strong>${unpackedGrandTotal}</strong></td></tr>`;
       html+=`</tbody></table></div>`;
     }
 
@@ -5541,7 +5447,191 @@ function goToBin(secId){
   }
 }
 
-// ══ PSR PRINT ══
+function addCustomCapacity(){
+  var is='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:8px;font-size:13px;font-family:inherit;outline:none;width:100%;';
+  showConfirm('Add System to On Hand',
+    '<div style="text-align:left;"><label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:4px;">System Name (e.g. G-12, 68in PC)</label><input id="ccSysName" style="'+is+'" placeholder="System name..."></div>',
+    [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
+     {label:'Add',cls:'btn-primary',fn:function(){
+       var name=(document.getElementById('ccSysName')||{}).value||'';
+       if(!name.trim()){toast('Enter a system name','error');return;}
+       if(!S.customCapacity) S.customCapacity=[];
+       S.customCapacity.push({sys:name.trim(),cap:0});
+       save(); renderPSR();
+       toast(name.trim()+' added to On Hand','success');
+     }}]);
+}
+
+// ══════════════════════════════════════════════
+// ABN OPS PLANNER TAB
+// ══════════════════════════════════════════════
+function renderABNPlanner(){
+  var c=document.getElementById('abnPlannerContent');
+  if(!c) return;
+  if(!S.abnOps) S.abnOps=[];
+  var now=new Date(); now.setHours(0,0,0,0);
+  var html='';
+
+  // ── ABN Ops table ──
+  var totalRequested=0;
+  S.abnOps.forEach(function(op){totalRequested+=(parseInt(op.requested)||0);});
+
+  html+=`<div class="psr-section">
+    <div class="psr-section-title">✈️ Airborne Operations (ABN Op) <button class="btn btn-sm btn-secondary" onclick="addAbnOp();setTimeout(renderABNPlanner,100)" style="margin-left:8px;">+ Add Op</button></div>`;
+
+  if(S.abnOps.length>0){
+    html+=`<table class="psr-table" style="margin-bottom:16px;"><thead><tr><th>Operation</th><th>System</th><th>Date</th><th>Requested</th><th></th></tr></thead><tbody>`;
+    S.abnOps.forEach(function(op,i){
+      var sysOpts='<option value="">--</option>';
+      ['T-11','T-11R','T-11R SP','MC-6','RA-1','RA-1R','RA-1 DBSL'].forEach(function(s){
+        sysOpts+=`<option value="${s}" ${op.system===s?'selected':''}>${s}</option>`;
+      });
+      var is2='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:4px 8px;font-size:12px;outline:none;font-family:inherit;width:100%;';
+      html+=`<tr>
+        <td><input type="text" value="${esc(op.name)}" placeholder="Op name" onchange="updAbnOp(${i},'name',this.value)" style="${is2}"></td>
+        <td style="width:110px;"><select onchange="updAbnOp(${i},'system',this.value)" style="${is2}">${sysOpts}</select></td>
+        <td style="width:130px;"><input type="date" value="${op.date||''}" onchange="updAbnOp(${i},'date',this.value)" style="${is2}color-scheme:dark;"></td>
+        <td style="width:90px;"><input type="number" value="${op.requested||''}" min="0" placeholder="#" onchange="updAbnOp(${i},'requested',this.value)" style="${is2}width:70px;text-align:center;"></td>
+        <td style="width:40px;"><button class="row-action-btn delete" onclick="delAbnOp(${i});renderABNPlanner()">🗑</button></td>
+      </tr>`;
+    });
+    html+=`<tr style="border-top:2px solid var(--border);"><td><strong>TOTAL</strong></td><td></td><td></td><td><strong>${totalRequested}</strong></td><td></td></tr>`;
+    html+=`</tbody></table>`;
+  } else {
+    html+=`<div style="color:var(--text-muted);font-size:12px;padding:8px 0 16px;">No operations scheduled. Click + Add Op to track.</div>`;
+  }
+  html+=`</div>`;
+
+  // ── Availability Calculation ──
+  var sysList=['T-11','T-11R','MC-6','RA-1','RA-1R','RA-1 DBSL'];
+  var sysAvail={};
+  var curMonth=now.getMonth(), curYear=now.getFullYear();
+  var monthNames=['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+  sysList.forEach(function(sys){
+    var packed=0,expiringThisMonth=0,signedOut=0,requested=0;
+    S.sections.forEach(function(sec){
+      var match=(sys==='T-11R')?(sec.systemType==='T-11R'||sec.systemType==='T-11R SP'):(sec.systemType===sys);
+      if(!match) return;
+      packed+=Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
+      sec.rows.forEach(function(r){
+        if(r.serialNumber&&r.packer&&r.ip&&!r._signedOut&&!r._popped) packed++;
+        if(r.expirationDate&&!r._signedOut&&!r._popped){
+          var d=new Date(r.expirationDate+'T00:00:00');
+          if(d.getMonth()===curMonth&&d.getFullYear()===curYear) expiringThisMonth++;
+        }
+      });
+      if(sec.bulkExpDate&&(parseInt(sec.bulkCount)||0)>0){
+        var bd=new Date(sec.bulkExpDate+'T00:00:00');
+        if(bd.getMonth()===curMonth&&bd.getFullYear()===curYear) expiringThisMonth+=(parseInt(sec.bulkCount)||0);
+      }
+    });
+    (S.signedOut||[]).forEach(function(so){
+      if(so.status!=='out'||so._requestId) return;
+      var soSys=(so.system||'').trim();
+      var m=(sys==='T-11R')?(soSys==='T-11R'||soSys==='T-11R SP'):(soSys===sys);
+      if(m) signedOut+=parseInt(so.count)||0;
+    });
+    (S.abnOps||[]).forEach(function(op){
+      var opSys=(op.system||'').trim();
+      var m=(sys==='T-11R')?(opSys==='T-11R'||opSys==='T-11R SP'):(opSys===sys);
+      if(m) requested+=parseInt(op.requested)||0;
+    });
+    sysAvail[sys]={packed,expiring:expiringThisMonth,signedOut,requested,available:packed-requested-expiringThisMonth};
+  });
+
+  // Expiring by month
+  var expiringByMonth={};
+  for(var m2=0;m2<6;m2++){
+    var mStart=new Date(now.getFullYear(),now.getMonth()+m2,1);
+    var mEnd=new Date(now.getFullYear(),now.getMonth()+m2+1,0);
+    var mKey=getMonthLabel(mStart);
+    var cnt=0;
+    S.sections.forEach(function(sec){sec.rows.forEach(function(r){
+      if(r.expirationDate){var exp=new Date(r.expirationDate+'T00:00:00');if(exp>=mStart&&exp<=mEnd)cnt++;}
+    });});
+    if(cnt>0) expiringByMonth[mKey]=cnt;
+  }
+  var hasExpiring=Object.keys(expiringByMonth).length>0;
+
+  html+=`<div style="display:grid;grid-template-columns:${hasExpiring?'1fr 1fr':'1fr'};gap:16px;margin-bottom:16px;">
+    <div class="psr-section">
+      <div class="psr-section-title">📊 Availability Calculation</div>
+      <table class="psr-table"><thead><tr><th></th>`;
+  sysList.forEach(function(sys){html+=`<th style="text-align:right;">${sys}</th>`;});
+  html+=`<th style="text-align:right;">TOTAL</th></tr></thead><tbody>`;
+  var rows2=[
+    ['RFI',function(s){return sysAvail[s].packed;},true],
+    ['Requested (ABN)',function(s){return sysAvail[s].requested;},false],
+    ['Signed Out',function(s){return sysAvail[s].signedOut;},false],
+    ['Expiring '+monthNames[curMonth],function(s){return sysAvail[s].expiring;},false],
+    ['Available',function(s){return sysAvail[s].available;},true],
+  ];
+  rows2.forEach(function(row,ri){
+    var label=row[0],fn=row[1],bold=row[2];
+    var vals=sysList.map(fn);
+    var tot=vals.reduce(function(a,b){return a+b;},0);
+    var sep=ri===rows2.length-1?'border-top:2px solid var(--border);':'';
+    html+=`<tr style="${sep}"><td>${bold?'<strong>'+label+'</strong>':label}</td>`;
+    vals.forEach(function(v){
+      var nc=label==='Available'&&v<0?'exp-expired':'';
+      html+=`<td style="text-align:right;" class="${nc}">${bold?'<strong>'+v+'</strong>':v}</td>`;
+    });
+    var ntot=label==='Available'&&tot<0?'exp-expired':'';
+    html+=`<td style="text-align:right;" class="${ntot}">${bold?'<strong>'+tot+'</strong>':tot}</td></tr>`;
+  });
+  html+=`</tbody></table></div>`;
+
+  if(hasExpiring){
+    html+=`<div class="psr-section">
+      <div class="psr-section-title">📅 Chutes Expiring</div>
+      <table class="psr-table"><thead><tr><th>Month</th><th>Count</th></tr></thead><tbody>`;
+    Object.entries(expiringByMonth).forEach(function(entry){
+      html+=`<tr><td>${entry[0]}</td><td class="exp-30"><strong>${entry[1]}</strong></td></tr>`;
+    });
+    html+=`</tbody></table></div>`;
+  }
+  html+=`</div>`;
+
+  // ── Signed Out Chutes ──
+  var activeSOs=(S.signedOut||[]).filter(function(s){return s.status==='out';});
+  html+=`<div class="psr-section">
+    <div class="psr-section-title">📋 Signed Out Chutes <span style="font-size:10px;color:var(--text-muted);font-weight:400;margin-left:8px;">Manage in Issue &amp; Return</span></div>`;
+  if(activeSOs.length>0){
+    html+=`<table class="psr-table"><thead><tr><th>Unit</th><th>System</th><th>Qty</th><th>Date</th><th></th></tr></thead><tbody>`;
+    (S.signedOut||[]).forEach(function(so,i){
+      if(so.status!=='out') return;
+      var qty=(so.scannedOut||[]).length||(parseInt(so.count)||so.totalQty||0);
+      html+=`<tr><td><strong>${esc(so.unit||'')}</strong></td><td>${esc(so.system||'')}</td><td><strong>${qty}</strong></td><td>${so.date||''}</td><td><button class="row-action-btn delete" onclick="delSignedOut(${i})" title="Remove">🗑</button></td></tr>`;
+    });
+    html+=`</tbody></table>`;
+  } else {
+    html+=`<div style="color:var(--text-muted);font-size:12px;padding:8px;">No chutes currently signed out.</div>`;
+  }
+  html+=`</div>`;
+
+  // ── Submitted Parachute Requests (status display) ──
+  var allReqs=(S.paraRequests||[]);
+  if(allReqs.length>0){
+    html+=`<div class="psr-section">
+      <div class="psr-section-title">📝 Submitted Parachute Requests</div>
+      <table class="psr-table"><thead><tr><th>Unit</th><th>Chutes Requested</th><th>Op Date</th><th>Submitted</th><th>Status</th></tr></thead><tbody>`;
+    allReqs.slice().reverse().forEach(function(req){
+      var statusCls=req.status==='approved'?'exp-ok':req.status==='denied'?'exp-expired':'exp-30';
+      var statusLabel=req.status==='approved'?'✓ Approved':req.status==='denied'?'✗ Denied':'⏳ Pending';
+      html+=`<tr>
+        <td><strong>${esc(req.unitRequesting||req.unit||'—')}</strong></td>
+        <td>${esc(req.paraType||'—')}</td>
+        <td>${req.opFrom||'—'}</td>
+        <td>${req.submittedAt?new Date(req.submittedAt).toLocaleDateString():'—'}</td>
+        <td class="${statusCls}"><strong>${statusLabel}</strong></td>
+      </tr>`;
+    });
+    html+=`</tbody></table></div>`;
+  }
+
+  c.innerHTML=html;
+}
 function printPSR(){
   const now=new Date();
   const printed=now.toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
@@ -5798,6 +5888,95 @@ function printPSR(){
   }
 
   body+=`<div class="footer">Parachute Management System — PSR Generated ${printed} ${printTime}</div>`;
+
+  // ── Cross-unit quick update ──
+  var otherUnits=getUnits().filter(function(u){return u.id!==getActiveUnit();});
+  var unitSummaries=[];
+  otherUnits.forEach(function(u){
+    var uData=null;
+    try{ uData=JSON.parse(localStorage.getItem('pms_data_'+u.id)||'null'); }catch(e){}
+    if(!uData||!uData.sections) return;
+    // Compute per-system counts
+    var bySys={};
+    function addSys(sys,rfi,unpacked,maint){
+      if(!bySys[sys]) bySys[sys]={rfi:0,unpacked:0,maint:0};
+      bySys[sys].rfi+=rfi; bySys[sys].unpacked+=unpacked; bySys[sys].maint+=maint;
+    }
+    uData.sections.forEach(function(sec){
+      var sys=sec.systemType||'Unknown';
+      var rfi=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&!r._signedOut;}).length+Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
+      var unp=sec.rows.filter(function(r){return !r.packer||!r.serialNumber;}).length;
+      addSys(sys,rfi,unp,0);
+    });
+    var statusCounts=uData.statusCounts||{};
+    Object.keys(statusCounts).forEach(function(sys){
+      var maint=0;
+      (statusCounts[sys].maintenance||[]).forEach(function(e){maint+=(parseInt(e.count)||0);});
+      if(maint>0){ if(!bySys[sys]) bySys[sys]={rfi:0,unpacked:0,maint:0}; bySys[sys].maint+=maint; }
+    });
+    var totRFI=0,totUnp=0,totMaint=0;
+    Object.values(bySys).forEach(function(v){totRFI+=v.rfi;totUnp+=v.unpacked;totMaint+=v.maint;});
+    unitSummaries.push({unit:u,bySys:bySys,totRFI:totRFI,totUnp:totUnp,totMaint:totMaint});
+  });
+
+  if(unitSummaries.length>0){
+    body+=`<div style="page-break-before:always;"></div>`;
+    body+=`<h1>Multi-Shop Quick Update</h1>`;
+    body+=`<div class="header-info">Combined view across all shops — Generated ${printed} ${printTime}</div>`;
+
+    // Per-unit summaries
+    unitSummaries.forEach(function(us){
+      body+=`<div class="section-title">${esc(us.unit.name||us.unit.id)}${us.unit.designation?' — '+esc(us.unit.designation):''}</div>`;
+      body+=`<table><thead><tr><th>System</th><th>RFI (Packed)</th><th>Unpacked</th><th>Maintenance</th><th>Total</th></tr></thead><tbody>`;
+      Object.keys(us.bySys).sort().forEach(function(sys){
+        var v=us.bySys[sys];
+        var tot=v.rfi+v.unpacked+v.maint;
+        if(tot===0) return;
+        body+=`<tr><td><strong>${sys}</strong></td><td>${v.rfi||'—'}</td><td>${v.unpacked||'—'}</td><td>${v.maint||'—'}</td><td><strong>${tot}</strong></td></tr>`;
+      });
+      body+=`<tr style="border-top:2px solid #333;"><td><strong>TOTAL</strong></td><td><strong>${us.totRFI}</strong></td><td><strong>${us.totUnp}</strong></td><td><strong>${us.totMaint}</strong></td><td><strong>${us.totRFI+us.totUnp+us.totMaint}</strong></td></tr>`;
+      body+=`</tbody></table>`;
+    });
+
+    // Combined totals across ALL units (current + others)
+    body+=`<div class="section-title">Combined Totals — All Shops</div>`;
+    var allSys={};
+    // Add current unit
+    S.sections.forEach(function(sec){
+      var sys=sec.systemType||'Unknown';
+      if(!allSys[sys]) allSys[sys]={rfi:0,unpacked:0,maint:0};
+      allSys[sys].rfi+=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&!r._signedOut;}).length+Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
+      allSys[sys].unpacked+=sec.rows.filter(function(r){return !r.packer||!r.serialNumber;}).length;
+    });
+    STATUS_SYS.forEach(function(sys){
+      var maint=0;
+      (S.statusCounts[sys]?.maintenance||[]).forEach(function(e){maint+=(parseInt(e.count)||0);});
+      if(maint>0){ if(!allSys[sys]) allSys[sys]={rfi:0,unpacked:0,maint:0}; allSys[sys].maint+=maint; }
+    });
+    // Add other units
+    unitSummaries.forEach(function(us){
+      Object.keys(us.bySys).forEach(function(sys){
+        if(!allSys[sys]) allSys[sys]={rfi:0,unpacked:0,maint:0};
+        allSys[sys].rfi+=us.bySys[sys].rfi;
+        allSys[sys].unpacked+=us.bySys[sys].unpacked;
+        allSys[sys].maint+=us.bySys[sys].maint;
+      });
+    });
+    var grandRFI=0,grandUnp=0,grandMaint=0;
+    body+=`<table><thead><tr><th>System</th><th>RFI (Packed)</th><th>Unpacked</th><th>Maintenance</th><th>Total</th></tr></thead><tbody>`;
+    Object.keys(allSys).sort().forEach(function(sys){
+      var v=allSys[sys];
+      var tot=v.rfi+v.unpacked+v.maint;
+      if(tot===0) return;
+      grandRFI+=v.rfi; grandUnp+=v.unpacked; grandMaint+=v.maint;
+      body+=`<tr><td><strong>${sys}</strong></td><td>${v.rfi||'—'}</td><td>${v.unpacked||'—'}</td><td>${v.maint||'—'}</td><td><strong>${tot}</strong></td></tr>`;
+    });
+    body+=`<tr style="border-top:2px solid #333;background:#f0f0f0;"><td><strong>GRAND TOTAL</strong></td><td><strong>${grandRFI}</strong></td><td><strong>${grandUnp}</strong></td><td><strong>${grandMaint}</strong></td><td><strong>${grandRFI+grandUnp+grandMaint}</strong></td></tr>`;
+    body+=`</tbody></table>`;
+    body+=`<div style="font-size:10px;color:#888;margin-top:8px;">* Other shop data is from last sync to this device. Push to DB on each shop for latest counts.</div>`;
+    body+=`<div class="footer">Parachute Management System — Multi-Shop PSR Generated ${printed} ${printTime}</div>`;
+  }
+
   openPrintPreview('Parachute Status Report (PSR)', body);
 }
 // ══ DATA EXPORT/IMPORT ══
