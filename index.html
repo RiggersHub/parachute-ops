@@ -1951,17 +1951,34 @@ function doCreateAccount(){
   // Push to Supabase so other devices see the new pending account
   if(sbClient) saveUsersDB(users).then(function(){dbLog('New account saved to DB: '+username);}).catch(function(e){dbLog('Account DB save error: '+e.message);});
 
-  // Post announcement so admins see pending account on home page
+  // Post announcement to ALL units so every user sees the pending account request
   var announceText='🔔 New account request: '+lastName+' is pending approval.';
-  if(!S.announcements) S.announcements=[];
-  S.announcements.unshift({
+  var newAnnounce={
     id:'acct-'+Date.now(),
     text:announceText,
     author:'System',
     ts:new Date().toISOString(),
     _isPendingAccount:true,
     _pendingName:lastName
+  };
+  // Write to every unit's announcement key so all users see it
+  var allUnits=getUnits();
+  allUnits.forEach(function(u){
+    var key='pms_announcements_'+u.id;
+    try{
+      var existing=JSON.parse(localStorage.getItem(key)||'[]');
+      existing.unshift(newAnnounce);
+      localStorage.setItem(key,JSON.stringify(existing));
+    }catch(e){}
   });
+  // Also push to DB if connected
+  if(sbClient){
+    try{
+      allUnits.forEach(function(u){
+        if(u._dbId) sbClient.from('pms_announcements').upsert({unit_id:u._dbId,id:newAnnounce.id,text:announceText,author:'System',ts:newAnnounce.ts,is_pending_account:true,pending_name:lastName}).then(function(){}).catch(function(){});
+      });
+    }catch(e){}
+  }
   save();
 
   populateLoginDropdown();
@@ -2274,7 +2291,15 @@ function approveUser(userName){
   user.role='rigger';
   saveUsers(users);
   if(sbClient) saveUsersDB(users).catch(function(e){dbLog('approveUser DB error: '+e.message);});
-  // Remove the pending announcement for this user
+  // Remove the pending announcement for this user from ALL unit keys
+  getUnits().forEach(function(u){
+    var key='pms_announcements_'+u.id;
+    try{
+      var existing=JSON.parse(localStorage.getItem(key)||'[]');
+      var filtered=existing.filter(function(a){return !(a._isPendingAccount&&a._pendingName===userName);});
+      localStorage.setItem(key,JSON.stringify(filtered));
+    }catch(e){}
+  });
   if(S.announcements){
     S.announcements=S.announcements.filter(function(a){return !(a._isPendingAccount&&a._pendingName===userName);});
     save();
@@ -4391,19 +4416,15 @@ function openTransferChutes(){
   var sectionRows='';
   var anyRows=false;
   S.sections.forEach(function(sec){
-    // Packed (RFI)
     var packed=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&!r._signedOut;}).length+Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
-    // Unpacked rows
     var unpacked=sec.rows.filter(function(r){return !r.packer||!r.serialNumber;}).length;
     if(packed===0&&unpacked===0) return;
     anyRows=true;
-
     sectionRows+=`<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
         <span style="font-weight:700;font-size:13px;">${esc(sec.binLocation)}</span>
-        <span class="badge badge-${sec.systemType.toLowerCase().replace(/[\s\/]/g,'-')}" style="font-size:10px;">${esc(sec.systemType)}</span>
+        <span style="font-size:10px;color:var(--text-muted);">${esc(sec.systemType)}</span>
       </div>`;
-
     if(packed>0){
       sectionRows+=`<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--border);">
         <input type="checkbox" id="txP-${sec.id}" onchange="var q=document.getElementById('txPQ-${sec.id}');q.disabled=!this.checked;if(this.checked)q.focus();" style="width:15px;height:15px;cursor:pointer;">
@@ -4412,7 +4433,6 @@ function openTransferChutes(){
         <input type="number" id="txPQ-${sec.id}" min="1" max="${packed}" placeholder="#" disabled style="width:60px;text-align:center;${is}opacity:0.5;" onfocus="this.style.opacity='1';">
       </div>`;
     }
-
     if(unpacked>0){
       sectionRows+=`<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;align-items:center;padding:6px 0;border-top:1px solid var(--border);">
         <input type="checkbox" id="txU-${sec.id}" onchange="var q=document.getElementById('txUQ-${sec.id}');q.disabled=!this.checked;if(this.checked)q.focus();" style="width:15px;height:15px;cursor:pointer;">
@@ -4421,8 +4441,24 @@ function openTransferChutes(){
         <input type="number" id="txUQ-${sec.id}" min="1" max="${unpacked}" placeholder="#" disabled style="width:60px;text-align:center;${is}opacity:0.5;" onfocus="this.style.opacity='1';">
       </div>`;
     }
-
     sectionRows+=`</div>`;
+  });
+
+  // Popped chutes from tracker
+  var poppedRows='';
+  Object.keys(S.statusCounts||{}).forEach(function(sysKey){
+    (S.statusCounts[sysKey]?.popped||[]).forEach(function(e,ei){
+      var cnt=parseInt(e.count)||0;
+      if(cnt<=0) return;
+      anyRows=true;
+      var uid='txPopped-'+sysKey.replace(/[^a-z0-9]/gi,'_')+'-'+ei;
+      poppedRows+=`<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:8px;align-items:center;padding:8px 10px;margin-bottom:6px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;">
+        <input type="checkbox" id="cb${uid}" onchange="var q=document.getElementById('q${uid}');q.disabled=!this.checked;if(this.checked)q.focus();" style="width:15px;height:15px;cursor:pointer;">
+        <div style="font-size:12px;"><strong>${esc(sysKey)}</strong> — ${esc(e.bin||'Bin')} <span style="color:var(--warning);font-weight:600;">${cnt} avail</span></div>
+        <label style="font-size:10px;color:var(--text-muted);">Qty</label>
+        <input type="number" id="q${uid}" data-sys="${esc(sysKey)}" data-idx="${ei}" min="1" max="${cnt}" placeholder="#" disabled style="width:60px;text-align:center;${is}opacity:0.5;" onfocus="this.style.opacity='1';">
+      </div>`;
+    });
   });
 
   if(!anyRows){toast('No chutes available to transfer','warning');return;}
@@ -4443,9 +4479,10 @@ function openTransferChutes(){
           <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:4px;">Transfer To</label>
           <select id="txDestUnit" style="${is}">${unitOpts}</select>
         </div>
-        <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:10px;">Select Bins &amp; Chute Type</div>
+        <div style="font-size:12px;font-weight:600;color:var(--accent);margin-bottom:10px;">RPR Bins</div>
         ${sectionRows}
-        <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">Check the bins and types you want to transfer and enter the quantity for each.</div>
+        ${poppedRows?`<div style="font-size:12px;font-weight:600;color:var(--warning);margin-top:12px;margin-bottom:8px;">Unpacked (Tracker)</div>${poppedRows}`:''}
+        <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">Check items to transfer and enter quantities.</div>
       </div>
       <div style="padding:14px 20px;border-top:1px solid var(--border);display:flex;gap:10px;justify-content:flex-end;flex-shrink:0;">
         <button class="btn btn-secondary" onclick="document.getElementById('transferOverlay').remove()">Cancel</button>
@@ -4542,6 +4579,31 @@ async function executeTransfer(){
       totalMoved+=toMoveU.length;
       summary.push(toMoveU.length+' '+sec.systemType+' unpacked ('+sec.binLocation+')');
     }
+  });
+
+  // Also collect popped chute transfers
+  Object.keys(S.statusCounts||{}).forEach(function(sysKey){
+    (S.statusCounts[sysKey]?.popped||[]).forEach(function(e,ei){
+      var uid='txPopped-'+sysKey.replace(/[^a-z0-9]/gi,'_')+'-'+ei;
+      var cb=document.getElementById('cb'+uid);
+      var qEl=document.getElementById('q'+uid);
+      if(!cb||!cb.checked) return;
+      var qty=parseInt((qEl||{}).value)||0;
+      if(qty<=0) return;
+      var avail=parseInt(e.count)||0;
+      if(qty>avail){toast('Only '+avail+' available in '+sysKey+' bin '+esc(e.bin||''),'error');return;}
+      // Deduct from source
+      e.count=avail-qty;
+      // Add to dest statusCounts
+      if(!destS.statusCounts) destS.statusCounts={};
+      if(!destS.statusCounts[sysKey]) destS.statusCounts[sysKey]={popped:[],maintenance:[]};
+      if(!destS.statusCounts[sysKey].popped) destS.statusCounts[sysKey].popped=[];
+      var destEntry=destS.statusCounts[sysKey].popped.find(function(de){return (de.bin||'')===( e.bin||'');});
+      if(destEntry) destEntry.count=(parseInt(destEntry.count)||0)+qty;
+      else destS.statusCounts[sysKey].popped.push({bin:e.bin||'',count:qty});
+      totalMoved+=qty;
+      summary.push(qty+' '+sysKey+' unpacked/popped ('+esc(e.bin||'tracker')+')');
+    });
   });
 
   if(totalMoved===0){toast('Nothing was transferred','warning');return;}
@@ -4954,11 +5016,6 @@ function renderPSR(){
   const c=document.getElementById('psrContent');
   if(!c) return;
 
-  if(S.sections.length===0){
-    c.innerHTML=`<div class="empty-state"><div class="empty-state-icon">📊</div><div class="empty-state-text">No data yet</div><div class="empty-state-hint">Create sections in Pack Log to see the overview</div></div>`;
-    return;
-  }
-
   const now=new Date(); now.setHours(0,0,0,0);
   const today=now.toISOString().split('T')[0];
 
@@ -5034,7 +5091,7 @@ function renderPSR(){
   });
   if(ec['T-11R']&&ec['T-11R'].auth) actualT11R=parseInt(ec['T-11R'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='T-11R'||sec.systemType==='T-11R SP') actualT11R+=countRealRows(sec)+(parseInt(sec.bulkCount)||0);
+    if(sec.systemType==='T-11R') actualT11R+=countRealRows(sec)+(parseInt(sec.bulkCount)||0);
   });
   if(ec['MC-6']&&ec['MC-6'].auth) actualMC6=parseInt(ec['MC-6'].auth)||0;
   else S.sections.forEach(sec=>{
@@ -5135,29 +5192,31 @@ function renderPSR(){
   html+=`<div class="psr-summary">
     <div class="psr-stat"><div class="psr-stat-value">${totalChutes}</div><div class="psr-stat-label">Total RFI</div></div>
     <div class="psr-stat warning"><div class="psr-stat-value">${totalPopped}</div><div class="psr-stat-label">Total Unpacked</div></div>
-    <div class="psr-stat ${expiring7>0?'danger':'success'}"><div class="psr-stat-value">${expiring7}</div><div class="psr-stat-label">Expiring ≤ 7 Days</div></div>
     <div class="psr-stat ${expiring30>0?'warning':'success'}"><div class="psr-stat-value">${expiring30}</div><div class="psr-stat-label">Expiring ≤ 30 Days</div></div>
     <div class="psr-stat warning"><div class="psr-stat-value">${totalMaint}</div><div class="psr-stat-label">In Maintenance</div></div>
   </div>`;
 
   // ── Unpacked Chutes by System ──
   const unpackedBySystem={};
-  S.sections.forEach(sec=>{
-    const unpacked=sec.rows.filter(r=>(!r.serialNumber||!r.packer)).length;
+  // RPR sections — rows missing serial or packer
+  S.sections.forEach(function(sec){
+    var unpacked=sec.rows.filter(function(r){return !r.serialNumber||!r.packer;}).length;
     if(unpacked>0){
       if(!unpackedBySystem[sec.systemType]) unpackedBySystem[sec.systemType]={total:0,bins:[]};
       unpackedBySystem[sec.systemType].total+=unpacked;
       unpackedBySystem[sec.systemType].bins.push({bin:sec.binLocation,count:unpacked});
     }
   });
-  // Also add status counts popped entries as unpacked
-  STATUS_SYS.forEach(sys=>{
-    (S.statusCounts[sys]?.popped||[]).forEach(e=>{
-      const cnt=parseInt(e.count)||0;
+  // Status tracker — popped entries from ALL keys in statusCounts (not just STATUS_SYS)
+  Object.keys(S.statusCounts||{}).forEach(function(sysKey){
+    (S.statusCounts[sysKey]?.popped||[]).forEach(function(e){
+      var cnt=parseInt(e.count)||0;
       if(cnt>0){
-        if(!unpackedBySystem[sys]) unpackedBySystem[sys]={total:0,bins:[]};
-        unpackedBySystem[sys].total+=cnt;
-        unpackedBySystem[sys].bins.push({bin:e.bin||'Tracker',count:cnt});
+        // Map 'T-11R/SP' tracker key back to display name
+        var displaySys=sysKey==='T-11R/SP'?'T-11R/SP':sysKey;
+        if(!unpackedBySystem[displaySys]) unpackedBySystem[displaySys]={total:0,bins:[]};
+        unpackedBySystem[displaySys].total+=cnt;
+        unpackedBySystem[displaySys].bins.push({bin:e.bin||'Tracker',count:cnt});
       }
     });
   });
@@ -5205,6 +5264,35 @@ function renderPSR(){
     }
 
     html+=`</div>`;
+  }
+
+  // ── Maintenance by System ──
+  const maintBySystem={};
+  STATUS_SYS.forEach(function(sys){
+    (S.statusCounts[sys]?.maintenance||[]).forEach(function(e){
+      const cnt=parseInt(e.count)||0;
+      if(cnt>0){
+        if(!maintBySystem[sys]) maintBySystem[sys]={total:0,bins:[]};
+        maintBySystem[sys].total+=cnt;
+        maintBySystem[sys].bins.push({bin:e.bin||'—',count:cnt});
+      }
+    });
+  });
+  if(Object.keys(maintBySystem).length>0){
+    let maintGrandTotal=0;
+    html+=`<div class="psr-section">
+      <div class="psr-section-title">🔧 Maintenance by System</div>
+      <table class="psr-table"><thead><tr><th>System</th><th>Bin / Description</th><th>Qty</th></tr></thead><tbody>`;
+    Object.keys(maintBySystem).forEach(function(sys){
+      const m=maintBySystem[sys];
+      maintGrandTotal+=m.total;
+      m.bins.forEach(function(b,bi){
+        html+=`<tr><td>${bi===0?'<strong>'+sys+'</strong>':''}</td><td>${esc(b.bin)}</td><td>${b.count}</td></tr>`;
+      });
+      if(m.bins.length>1) html+=`<tr style="border-top:1px dashed var(--border);"><td></td><td><em>subtotal</em></td><td><strong>${m.total}</strong></td></tr>`;
+    });
+    html+=`<tr style="border-top:2px solid var(--border);"><td><strong>TOTAL</strong></td><td></td><td><strong>${maintGrandTotal}</strong></td></tr>`;
+    html+=`</tbody></table></div>`;
   }
 
   // ── Expiration Alerts (summarized by bin) ──
