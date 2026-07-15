@@ -406,6 +406,9 @@
     <button class="login-btn" onclick="doLogin()">Sign In</button>
     <div style="margin-top:14px;"><button onclick="showCreateAccount()" style="background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;text-decoration:underline;font-family:inherit;">Create New Account</button></div>
     <div style="margin-top:10px;"><button onclick="newParaRequest()" style="background:var(--accent);border:none;color:#fff;font-size:13px;cursor:pointer;font-family:inherit;padding:8px 20px;border-radius:6px;font-weight:600;width:100%;">Request Parachutes</button></div>
+    <div style="margin-top:20px;border-top:1px solid var(--border);padding-top:12px;">
+      <button onclick="emergencyReset()" style="background:none;border:none;color:var(--text-muted);font-size:10px;cursor:pointer;font-family:inherit;opacity:0.5;">⚠ Device Reset (clears local cache)</button>
+    </div>
   </div>
   <div class="login-box" id="createPanel" style="display:none;">
     <h2>Create Account</h2>
@@ -1815,23 +1818,49 @@ function saveUsers(users){
   // Async save to Supabase
   if(sbClient) saveUsersDB(users).then(function(){dbLog('Users saved to DB');}).catch(function(e){dbLog('saveUsers ERROR: '+e.message);});
 }
+function emergencyReset(){
+  if(!confirm('This will clear all local data on this device and reload from the cloud database. Your cloud data is NOT affected. Continue?')) return;
+  try{
+    // Preserve user list and active unit before clearing
+    var users=localStorage.getItem('pms_users');
+    var activeUnit=localStorage.getItem('pms_activeUnit');
+    localStorage.clear();
+    if(users) localStorage.setItem('pms_users',users);
+    if(activeUnit) localStorage.setItem('pms_activeUnit',activeUnit);
+  }catch(e){ localStorage.clear(); }
+  location.reload();
+}
+
 function ensureDefaultAdmin(){
   var users=getUsers();
   var origLen=users.length;
-  // Deduplicate Zink - keep first only
+  // Deduplicate Zink - keep first only, always ensure masteradmin role
   var seenZink=false;
   var cleaned=[];
+  // Get local pin for Zink before any merge so we don't lose it
+  var localUsers=[];
+  try{localUsers=JSON.parse(localStorage.getItem('pms_users')||'[]');}catch(e){}
+  var localZink=localUsers.find(function(u){return u.name==='Zink';});
   for(var i=0;i<users.length;i++){
     if(users[i].name==='Zink'){
       if(seenZink) continue;
       seenZink=true;
       users[i].role='masteradmin';
       if(!users[i].lastName) users[i].lastName='Zink';
+      // Never let DB overwrite master admin pin if we have a local one
+      if(localZink&&localZink.pin&&users[i].pin!==localZink.pin){
+        users[i].pin=localZink.pin;
+      }
     }
     cleaned.push(users[i]);
   }
   if(!seenZink){
-    cleaned.push({name:'Zink', lastName:'Zink', role:'masteradmin', pin:'1234'});
+    // Restore from local if available, otherwise use default
+    if(localZink){
+      cleaned.push(Object.assign({},localZink,{role:'masteradmin'}));
+    } else {
+      cleaned.push({name:'Zink', lastName:'Zink', role:'masteradmin', pin:'1234'});
+    }
   }
   if(cleaned.length!==origLen||!seenZink){
     saveUsers(cleaned);
