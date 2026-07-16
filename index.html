@@ -674,7 +674,14 @@ function populateSystemDropdown(){
 
 let S = { sections:[], binLocations:[], knownPackers:[], knownIPs:[], masterInventory:{}, statusCounts:{}, equipmentCounts:{}, mffData:{}, customCapacity:[], archive:{deletedRows:[],deletedSections:[],monthlyLogs:[]}, nextSectionId:1 };
 
-function getStorageKey(){ return 'pms_data_'+getActiveUnit(); }
+function getStorageKey(){
+  var uid=localStorage.getItem('pms_activeUnit');
+  if(!uid){
+    // Try first unit in list
+    try{var units=JSON.parse(localStorage.getItem('pms_units')||'[]');if(units.length>0)uid=units[0].id;}catch(e){}
+  }
+  return 'pms_data_'+(uid||'default');
+}
 function load(){
   try{
     const d=localStorage.getItem(getStorageKey())||localStorage.getItem('paraOps4');
@@ -1885,22 +1892,36 @@ async function doLogin(){
   var name=nameInput.value.trim();
   if(!name){err.textContent='Enter your last name';err.style.display='block';return;}
 
-  // If localStorage has no users, try syncing from Supabase first
   var users=getUsers();
-  if(users.length===0 && sbClient){
-    err.textContent='Connecting to database…';
+
+  // Always try to sync from DB on login attempt if connected
+  if(sbClient){
+    err.textContent='Connecting…';
     err.style.color='var(--accent)';
     err.style.display='block';
     if(btn) btn.disabled=true;
     try{
       var dbUsers=await getUsersDB();
       if(dbUsers&&dbUsers.length>0){
+        // Merge — don't lose local master admin pin
+        var localZink=users.find(function(u){return u.name==='Zink';});
+        dbUsers=dbUsers.map(function(u){
+          if(u.name==='Zink'&&localZink&&localZink.pin) u.pin=localZink.pin;
+          return u;
+        });
         localStorage.setItem('pms_users',JSON.stringify(dbUsers));
         users=dbUsers;
       }
-    }catch(e){ dbLog('doLogin syncUsers error: '+e.message); }
+    }catch(e){ dbLog('doLogin sync error: '+e.message); }
     err.style.color='';
+    err.style.display='none';
     if(btn) btn.disabled=false;
+  }
+
+  // Fallback — if still no users, ensure default admin exists
+  if(users.length===0){
+    users=[{name:'Zink',lastName:'Zink',role:'masteradmin',pin:'1234'}];
+    localStorage.setItem('pms_users',JSON.stringify(users));
   }
 
   var user=users.find(function(u){return (u.lastName||u.name).toLowerCase()===name.toLowerCase()||u.name.toLowerCase()===name.toLowerCase();});
@@ -1916,7 +1937,6 @@ async function doLogin(){
   sessionStorage.setItem('pms_session',JSON.stringify(currentUser));
   document.getElementById('loginOverlay').style.display='none';
   updateUserDisplay();
-  // Merge any shared requests submitted from login page
   var sharedReqs=JSON.parse(localStorage.getItem('pms_shared_requests')||'[]');
   if(sharedReqs.length>0){
     if(!S.paraRequests) S.paraRequests=[];
@@ -10284,17 +10304,12 @@ load(); autoMonthlySnapshot(); updateDL(); updateBinDL(); renderStatusBar(); ren
       // Resolve active unit
       await resolveUnitId();
       if(activeUnitId){
-        // Load data from DB
-        // Only load from DB if localStorage is empty (fresh browser)
-        var hasLocalData = !!localStorage.getItem(getStorageKey());
-        if(!hasLocalData){
-          var loaded = await loadFromDB();
-          if(loaded){
-            renderStatusBar(); renderSections(); renderHome();
-            dbLog('Loaded data from Supabase (fresh browser)');
-          }
-        } else {
-          dbLog('Using local data (DB sync available via Admin)');
+        // Always load from DB when connected so we get latest data
+        var loaded = await loadFromDB();
+        if(loaded){
+          try{localStorage.setItem(getStorageKey(),JSON.stringify(S));}catch(e){}
+          renderStatusBar(); renderSections(); renderHome();
+          dbLog('Loaded data from Supabase');
         }
         // Sync audit log
         await syncAuditLog();
