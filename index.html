@@ -1194,13 +1194,97 @@ async function testDbMethods(){
 }
 
 function initSupabase() {
-  if (window.supabase && window.supabase.createClient) {
-    sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-    dbLog('Client initialized');
-    return true;
+  // Use direct REST fetch - no JS library needed
+  // Create a mock sbClient that uses fetch directly
+  function makeHeaders(extra){
+    return Object.assign({
+      'apikey': SUPABASE_KEY,
+      'Authorization': 'Bearer ' + SUPABASE_KEY,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation'
+    }, extra||{});
   }
-  console.warn('Supabase library not loaded');
-  return false;
+  function restUrl(table, query){
+    return SUPABASE_URL + '/rest/v1/' + table + (query?'?'+query:'');
+  }
+  sbClient = {
+    from: function(table){
+      var _filters=[], _select='*', _order=null, _limit=null;
+      var chain = {
+        select: function(cols){ _select=cols||'*'; return chain; },
+        order: function(col, opts){ _order=col+(opts&&opts.ascending===false?' desc':''); return chain; },
+        limit: function(n){ _limit=n; return chain; },
+        eq: function(col,val){ _filters.push(col+'=eq.'+encodeURIComponent(val)); return chain; },
+        neq: function(col,val){ _filters.push(col+'=neq.'+encodeURIComponent(val)); return chain; },
+        then: function(resolve,reject){
+          var q='select='+_select;
+          _filters.forEach(function(f){q+='&'+f;});
+          if(_order) q+='&order='+_order;
+          if(_limit) q+='&limit='+_limit;
+          fetch(restUrl(table,q),{method:'GET',headers:makeHeaders()})
+            .then(function(r){return r.json().then(function(d){return{data:r.ok?d:null,error:r.ok?null:{message:JSON.stringify(d)}};});})
+            .then(resolve).catch(function(e){resolve({data:null,error:{message:e.message}});});
+          return chain;
+        },
+        insert: function(rows){
+          var isArr=Array.isArray(rows);
+          var body=JSON.stringify(rows);
+          var ic={
+            select: function(){ return ic; },
+            then: function(resolve){
+              fetch(restUrl(table),{method:'POST',headers:makeHeaders({'Prefer':'return=representation'}),body:body})
+                .then(function(r){return r.json().then(function(d){return{data:r.ok?d:null,error:r.ok?null:{message:JSON.stringify(d)}};});})
+                .then(resolve).catch(function(e){resolve({data:null,error:{message:e.message}});});
+              return ic;
+            }
+          };
+          return ic;
+        },
+        update: function(updates){
+          var body=JSON.stringify(updates);
+          var uc={
+            eq: function(col,val){ _filters.push(col+'=eq.'+encodeURIComponent(val)); return uc; },
+            then: function(resolve){
+              var q=_filters.join('&');
+              fetch(restUrl(table,q),{method:'PATCH',headers:makeHeaders({'Prefer':'return=minimal'}),body:body})
+                .then(function(r){return r.ok?{data:null,error:null}:r.json().then(function(d){return{data:null,error:{message:JSON.stringify(d)}};});})
+                .then(resolve).catch(function(e){resolve({data:null,error:{message:e.message}});});
+              return uc;
+            }
+          };
+          return uc;
+        },
+        upsert: function(rows){
+          var body=JSON.stringify(Array.isArray(rows)?rows:[rows]);
+          var uc={
+            then: function(resolve){
+              fetch(restUrl(table),{method:'POST',headers:makeHeaders({'Prefer':'resolution=merge-duplicates,return=minimal'}),body:body})
+                .then(function(r){return r.ok?{data:null,error:null}:r.json().then(function(d){return{data:null,error:{message:JSON.stringify(d)}};});})
+                .then(resolve).catch(function(e){resolve({data:null,error:{message:e.message}});});
+              return uc;
+            }
+          };
+          return uc;
+        },
+        delete: function(){
+          var dc={
+            eq: function(col,val){ _filters.push(col+'=eq.'+encodeURIComponent(val)); return dc; },
+            then: function(resolve){
+              var q=_filters.join('&');
+              fetch(restUrl(table,q),{method:'DELETE',headers:makeHeaders({'Prefer':'return=minimal'})})
+                .then(function(r){return{data:null,error:r.ok?null:{message:'Delete failed: '+r.status}};})
+                .then(resolve).catch(function(e){resolve({data:null,error:{message:e.message}});});
+              return dc;
+            }
+          };
+          return dc;
+        }
+      };
+      return chain;
+    }
+  };
+  dbLog('Client initialized (direct REST)');
+  return true;
 }
 
 // ══ HELPER: Safe DB call with fallback ══
