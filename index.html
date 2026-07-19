@@ -4857,8 +4857,18 @@ function renderHome(){
   const c=document.getElementById('homeContent');
   if(!c) return;
 
-  const unit=getUnitInfo();
+  // If no units exist yet, show setup prompt
   const units=getUnits();
+  if(units.length===0){
+    c.innerHTML=`<div style="text-align:center;padding:60px 20px;">
+      <div style="font-size:48px;margin-bottom:16px;">🪂</div>
+      <div style="font-size:20px;font-weight:700;margin-bottom:8px;">Welcome to PMS</div>
+      <div style="font-size:14px;color:var(--text-muted);margin-bottom:24px;">No unit configured yet. Create your unit to get started.</div>
+      <button class="btn btn-primary" onclick="addUnit()" style="font-size:15px;padding:12px 32px;">+ Create Unit</button>
+      <div style="margin-top:20px;font-size:12px;color:var(--text-muted);">If you had data before, go to <strong>Admin → Sync From Database</strong> to restore it.</div>
+    </div>`;
+    return;
+  }
   const announcements=JSON.parse(localStorage.getItem('pms_announcements_'+getActiveUnit())||'[]');
 
   const inputStyle='background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);padding:8px 12px;font-size:13px;font-family:inherit;outline:none;width:100%;';
@@ -10309,42 +10319,36 @@ try{renderHome();}catch(e){
       await syncUsers();
       ensureDefaultAdmin();
       populateLoginDropdown();
+      // Sync units from DB FIRST so renderHome has units to show
+      await syncUnits();
+      // Re-render home now that we have units
+      try{renderHome();}catch(e){console.error('renderHome after syncUnits:',e);}
       // Resolve active unit
       await resolveUnitId();
       if(activeUnitId){
-        // Always load from DB when connected so we get latest data
         var loaded = await loadFromDB();
         if(loaded){
           try{localStorage.setItem(getStorageKey(),JSON.stringify(S));}catch(e){}
-          renderStatusBar(); renderSections(); renderHome();
+          try{renderStatusBar();}catch(e){}
+          try{renderSections();}catch(e){}
+          try{renderHome();}catch(e){console.error('renderHome after loadFromDB:',e);}
           dbLog('Loaded data from Supabase');
         }
-        // Sync audit log
         await syncAuditLog();
       }
-      // Setup real-time sync
       setupRealtime();
       dbLog('Supabase fully connected');
       var si=document.getElementById('dbStatus');
       if(si){si.textContent='\u{1F7E2}';si.title='Connected to database';}
-      // Sync units and data from cloud
-      await syncUnits();
-      await resolveUnitId();
-      if(activeUnitId){
-        var loaded=await loadFromDB();
-        if(loaded){
-          try{localStorage.setItem(getStorageKey(),JSON.stringify(S));}catch(e){}
-          renderAll();
-          dbLog('Cloud data loaded');
-        }
-      }
       startAutoSync();
     }
   } catch(e){
     console.error('Supabase init error:', e);
-    dbLog('Falling back to localStorage');
+    dbLog('Init error: '+e.message+' - Falling back to localStorage');
     var si=document.getElementById('dbStatus');
     if(si){si.textContent='\u{1F534}';si.title='Database offline - using local storage';}
+    // Still try to render with local data
+    try{renderHome();}catch(re){console.error('renderHome fallback error:',re);}
   }
 })();
 // ══ PWA SERVICE WORKER ══
