@@ -1818,29 +1818,20 @@ function saveUsers(users){
 function ensureDefaultAdmin(){
   var users=getUsers();
   var origLen=users.length;
+  // Deduplicate Zink - keep first only
   var seenZink=false;
   var cleaned=[];
-  var localUsers=[];
-  try{localUsers=JSON.parse(localStorage.getItem('pms_users')||'[]');}catch(e){}
-  var localZink=localUsers.find(function(u){return u.name==='Zink';});
   for(var i=0;i<users.length;i++){
     if(users[i].name==='Zink'){
       if(seenZink) continue;
       seenZink=true;
       users[i].role='masteradmin';
       if(!users[i].lastName) users[i].lastName='Zink';
-      if(localZink&&localZink.pin&&users[i].pin!==localZink.pin){
-        users[i].pin=localZink.pin;
-      }
     }
     cleaned.push(users[i]);
   }
   if(!seenZink){
-    if(localZink){
-      cleaned.push(Object.assign({},localZink,{role:'masteradmin'}));
-    } else {
-      cleaned.push({name:'Zink', lastName:'Zink', role:'masteradmin', pin:'1234'});
-    }
+    cleaned.push({name:'Zink', lastName:'Zink', role:'masteradmin', pin:'1234'});
   }
   if(cleaned.length!==origLen||!seenZink){
     saveUsers(cleaned);
@@ -5646,226 +5637,8 @@ function printPSR(){
   const now=new Date();
   const printed=now.toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
   const printTime=now.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
+  const today=now.toISOString().split('T')[0];
   now.setHours(0,0,0,0);
-  const unitInfo=getUnitInfo();
-
-  // ── Helper: compute RFI and Unpacked+Maint counts for any unit's data blob ──
-  function computeUnitCounts(uData){
-    var bySys={};
-    function add(sys,rfi,unp,maint){
-      if(!bySys[sys]) bySys[sys]={rfi:0,unp:0,maint:0};
-      bySys[sys].rfi+=rfi; bySys[sys].unp+=unp; bySys[sys].maint+=maint;
-    }
-    (uData.sections||[]).forEach(function(sec){
-      var sys=sec.systemType||'Unknown';
-      var rfi=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&!r._signedOut;}).length
-               +Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
-      var unp=sec.rows.filter(function(r){return !r.serialNumber||!r.packer;}).length;
-      add(sys,rfi,unp,0);
-    });
-    // Unpacked from popped tracker
-    Object.keys(uData.statusCounts||{}).forEach(function(sysKey){
-      (uData.statusCounts[sysKey].popped||[]).forEach(function(e){
-        var cnt=parseInt(e.count)||0;
-        if(cnt>0) add(sysKey,0,cnt,0);
-      });
-      (uData.statusCounts[sysKey].maintenance||[]).forEach(function(e){
-        var cnt=parseInt(e.count)||0;
-        if(cnt>0) add(sysKey,0,0,cnt);
-      });
-    });
-    var totRFI=0,totUnp=0,totMaint=0;
-    Object.values(bySys).forEach(function(v){totRFI+=v.rfi;totUnp+=v.unp;totMaint+=v.maint;});
-    return {bySys:bySys,totRFI:totRFI,totUnp:totUnp,totMaint:totMaint};
-  }
-
-  // Current unit
-  var currentCounts=computeUnitCounts(S);
-
-  // Other units
-  var otherUnits=getUnits().filter(function(u){return u.id!==getActiveUnit();});
-  var otherData=[];
-  otherUnits.forEach(function(u){
-    try{
-      var d=JSON.parse(localStorage.getItem('pms_data_'+u.id)||'null');
-      if(d) otherData.push({unit:u,counts:computeUnitCounts(d),data:d});
-    }catch(e){}
-  });
-
-  // All systems across all units
-  var allSystems={};
-  function mergeSys(bySys){
-    Object.keys(bySys).forEach(function(sys){
-      if(!allSystems[sys]) allSystems[sys]={};
-    });
-  }
-  mergeSys(currentCounts.bySys);
-  otherData.forEach(function(od){mergeSys(od.counts.bySys);});
-  var sysList=Object.keys(allSystems).sort();
-
-  // ── BUILD BODY ──
-  var body='';
-
-  // Header
-  body+=`<h1>Parachute Status Report</h1>`;
-  body+=`<div class="header-info">
-    <strong>${esc(unitInfo.name||'—')}</strong>${unitInfo.designation?' — '+esc(unitInfo.designation):''}
-    &nbsp;|&nbsp; ${esc(unitInfo.facility||'')}
-    &nbsp;|&nbsp; Printed: ${printed} ${printTime}
-  </div>`;
-
-  // ── SECTION 1: RFI ──
-  body+=`<div class="section-title">✅ RFI — Ready for Issue (Packed)</div>`;
-  body+=`<table><thead><tr><th>System</th>`;
-  // Column per unit
-  var unitCols=[{label:esc(unitInfo.name||'This Unit'),counts:currentCounts}];
-  otherData.forEach(function(od){unitCols.push({label:esc(od.unit.name||od.unit.id),counts:od.counts});});
-  unitCols.forEach(function(uc){body+=`<th style="text-align:right;">${uc.label}</th>`;});
-  body+=`<th style="text-align:right;background:#e5e7eb;">TOTAL</th></tr></thead><tbody>`;
-  var grandRFI=0;
-  sysList.forEach(function(sys){
-    var vals=unitCols.map(function(uc){return (uc.counts.bySys[sys]||{}).rfi||0;});
-    var tot=vals.reduce(function(a,b){return a+b;},0);
-    if(tot===0) return;
-    grandRFI+=tot;
-    body+=`<tr><td><strong>${sys}</strong></td>`;
-    vals.forEach(function(v){body+=`<td style="text-align:right;">${v||'—'}</td>`;});
-    body+=`<td style="text-align:right;background:#f9fafb;"><strong>${tot}</strong></td></tr>`;
-  });
-  body+=`<tr style="border-top:2px solid #333;background:#e5e7eb;"><td><strong>TOTAL RFI</strong></td>`;
-  unitCols.forEach(function(uc){body+=`<td style="text-align:right;"><strong>${uc.counts.totRFI}</strong></td>`;});
-  body+=`<td style="text-align:right;"><strong>${grandRFI}</strong></td></tr>`;
-  body+=`</tbody></table>`;
-
-  // ── SECTION 2: UNPACKED + MAINTENANCE ──
-  body+=`<div class="section-title" style="margin-top:20px;">📦 Unpacked + Maintenance</div>`;
-  body+=`<table><thead><tr><th>System</th>`;
-  unitCols.forEach(function(uc){body+=`<th style="text-align:right;">${uc.label}</th>`;});
-  body+=`<th style="text-align:right;background:#e5e7eb;">TOTAL</th></tr></thead><tbody>`;
-  var grandUnpMaint=0;
-  sysList.forEach(function(sys){
-    var vals=unitCols.map(function(uc){
-      var v=uc.counts.bySys[sys]||{};
-      return (v.unp||0)+(v.maint||0);
-    });
-    var tot=vals.reduce(function(a,b){return a+b;},0);
-    if(tot===0) return;
-    grandUnpMaint+=tot;
-    body+=`<tr><td><strong>${sys}</strong></td>`;
-    vals.forEach(function(v){body+=`<td style="text-align:right;">${v||'—'}</td>`;});
-    body+=`<td style="text-align:right;background:#f9fafb;"><strong>${tot}</strong></td></tr>`;
-  });
-  var totUnpMaintByUnit=unitCols.map(function(uc){return uc.counts.totUnp+uc.counts.totMaint;});
-  body+=`<tr style="border-top:2px solid #333;background:#e5e7eb;"><td><strong>TOTAL UNPACKED+MAINT</strong></td>`;
-  totUnpMaintByUnit.forEach(function(v){body+=`<td style="text-align:right;"><strong>${v}</strong></td>`;});
-  body+=`<td style="text-align:right;"><strong>${grandUnpMaint}</strong></td></tr>`;
-  body+=`</tbody></table>`;
-
-  // ── COMBINED TOTAL ──
-  body+=`<table style="margin-top:12px;"><thead><tr><th>System</th>`;
-  unitCols.forEach(function(uc){body+=`<th style="text-align:right;">${uc.label} Total</th>`;});
-  body+=`<th style="text-align:right;background:#d1d5db;">ALL UNITS</th></tr></thead><tbody>`;
-  var grandAll=0;
-  sysList.forEach(function(sys){
-    var vals=unitCols.map(function(uc){
-      var v=uc.counts.bySys[sys]||{};
-      return (v.rfi||0)+(v.unp||0)+(v.maint||0);
-    });
-    var tot=vals.reduce(function(a,b){return a+b;},0);
-    if(tot===0) return;
-    grandAll+=tot;
-    body+=`<tr><td><strong>${sys}</strong></td>`;
-    vals.forEach(function(v){body+=`<td style="text-align:right;">${v||'—'}</td>`;});
-    body+=`<td style="text-align:right;background:#f3f4f6;"><strong>${tot}</strong></td></tr>`;
-  });
-  var totAllByUnit=unitCols.map(function(uc){return uc.counts.totRFI+uc.counts.totUnp+uc.counts.totMaint;});
-  body+=`<tr style="border-top:2px solid #333;background:#d1d5db;"><td><strong>GRAND TOTAL</strong></td>`;
-  totAllByUnit.forEach(function(v){body+=`<td style="text-align:right;"><strong>${v}</strong></td>`;});
-  body+=`<td style="text-align:right;"><strong>${grandAll}</strong></td></tr>`;
-  body+=`</tbody></table>`;
-  if(otherData.length>0) body+=`<div style="font-size:10px;color:#888;margin-top:6px;">* Other unit data from last device sync. Have each shop Push to DB for latest counts.</div>`;
-
-  body+=`<div class="footer">Parachute Management System — PSR Generated ${printed} ${printTime}</div>`;
-
-  // ── PAGE 2: RFI BIN BREAKDOWN ──
-  body+=`<div style="page-break-before:always;"></div>`;
-  body+=`<h1>RFI Bin Breakdown — ${esc(unitInfo.name||'This Unit')}</h1>`;
-  body+=`<div class="header-info">Pack dates and expiration dates for all RFI (packed) chutes — ${printed}</div>`;
-
-  // Group sections by system type
-  var rfiSections=S.sections.filter(function(sec){
-    var hasBulk=(parseInt(sec.bulkCount)||0)>0;
-    var hasRows=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&!r._signedOut;}).length>0;
-    return hasBulk||hasRows;
-  });
-
-  if(rfiSections.length===0){
-    body+=`<p style="color:#888;font-style:italic;">No RFI chutes in RPR.</p>`;
-  } else {
-    // One table per system type
-    var bySystemType={};
-    rfiSections.forEach(function(sec){
-      if(!bySystemType[sec.systemType]) bySystemType[sec.systemType]=[];
-      bySystemType[sec.systemType].push(sec);
-    });
-
-    Object.keys(bySystemType).sort().forEach(function(sys){
-      body+=`<div class="section-title">${sys}</div>`;
-      body+=`<table><thead><tr><th>Bin</th><th>RFI Qty</th><th>Pack Date</th><th>Exp Date</th><th>Status</th></tr></thead><tbody>`;
-      var sysTot=0;
-      bySystemType[sys].forEach(function(sec){
-        // Bulk count rows
-        if((parseInt(sec.bulkCount)||0)>0){
-          var avail=Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
-          if(avail>0){
-            sysTot+=avail;
-            var expDate=sec.bulkExpDate||'—';
-            var expCls='';
-            var expStatus='OK';
-            if(sec.bulkExpDate){
-              var diff=Math.ceil((new Date(sec.bulkExpDate+'T00:00:00')-now)/86400000);
-              if(diff<0){expCls='exp-expired';expStatus='EXPIRED';}
-              else if(diff<=7){expCls='exp-7';expStatus='≤7 days';}
-              else if(diff<=30){expCls='exp-30';expStatus='≤30 days';}
-            }
-            body+=`<tr><td><strong>${esc(sec.binLocation)}</strong></td><td>${avail}</td><td>${sec.bulkPackDate||'—'}</td><td class="${expCls}">${expDate}</td><td class="${expCls}">${expStatus}</td></tr>`;
-          }
-        }
-        // Serial number rows
-        var rfiRows=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&!r._signedOut;});
-        if(rfiRows.length>0){
-          sysTot+=rfiRows.length;
-          // Group by pack date
-          var byDate={};
-          rfiRows.forEach(function(r){
-            var pd=r.packDate||'Unknown';
-            if(!byDate[pd]) byDate[pd]={count:0,expDates:[]};
-            byDate[pd].count++;
-            if(r.expirationDate) byDate[pd].expDates.push(r.expirationDate);
-          });
-          Object.keys(byDate).sort().forEach(function(pd,pdi){
-            var grp=byDate[pd];
-            var earliestExp=grp.expDates.length>0?grp.expDates.sort()[0]:'—';
-            var expCls='',expStatus='OK';
-            if(earliestExp!=='—'){
-              var diff=Math.ceil((new Date(earliestExp+'T00:00:00')-now)/86400000);
-              if(diff<0){expCls='exp-expired';expStatus='EXPIRED';}
-              else if(diff<=7){expCls='exp-7';expStatus='≤7 days';}
-              else if(diff<=30){expCls='exp-30';expStatus='≤30 days';}
-            }
-            body+=`<tr><td>${pdi===0?'<strong>'+esc(sec.binLocation)+'</strong>':''}</td><td>${grp.count}</td><td>${fmtPrintDate(pd)}</td><td class="${expCls}">${earliestExp!=='—'?fmtPrintDate(earliestExp):'—'}</td><td class="${expCls}">${expStatus}</td></tr>`;
-          });
-        }
-      });
-      body+=`<tr style="border-top:2px solid #333;"><td><strong>TOTAL ${sys}</strong></td><td><strong>${sysTot}</strong></td><td></td><td></td><td></td></tr>`;
-      body+=`</tbody></table>`;
-    });
-  }
-
-  body+=`<div class="footer">Parachute Management System — RFI Bin Breakdown Generated ${printed} ${printTime}</div>`;
-
-  openPrintPreview('Parachute Status Report (PSR)', body);
-}
 
   // Unit info
   const unitInfo=getUnitInfo();
@@ -6117,6 +5890,96 @@ function printPSR(){
 
   body+=`<div class="footer">Parachute Management System — PSR Generated ${printed} ${printTime}</div>`;
 
+  // ── Cross-unit quick update ──
+  var otherUnits=getUnits().filter(function(u){return u.id!==getActiveUnit();});
+  var unitSummaries=[];
+  otherUnits.forEach(function(u){
+    var uData=null;
+    try{ uData=JSON.parse(localStorage.getItem('pms_data_'+u.id)||'null'); }catch(e){}
+    if(!uData||!uData.sections) return;
+    // Compute per-system counts
+    var bySys={};
+    function addSys(sys,rfi,unpacked,maint){
+      if(!bySys[sys]) bySys[sys]={rfi:0,unpacked:0,maint:0};
+      bySys[sys].rfi+=rfi; bySys[sys].unpacked+=unpacked; bySys[sys].maint+=maint;
+    }
+    uData.sections.forEach(function(sec){
+      var sys=sec.systemType||'Unknown';
+      var rfi=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&!r._signedOut;}).length+Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
+      var unp=sec.rows.filter(function(r){return !r.packer||!r.serialNumber;}).length;
+      addSys(sys,rfi,unp,0);
+    });
+    var statusCounts=uData.statusCounts||{};
+    Object.keys(statusCounts).forEach(function(sys){
+      var maint=0;
+      (statusCounts[sys].maintenance||[]).forEach(function(e){maint+=(parseInt(e.count)||0);});
+      if(maint>0){ if(!bySys[sys]) bySys[sys]={rfi:0,unpacked:0,maint:0}; bySys[sys].maint+=maint; }
+    });
+    var totRFI=0,totUnp=0,totMaint=0;
+    Object.values(bySys).forEach(function(v){totRFI+=v.rfi;totUnp+=v.unpacked;totMaint+=v.maint;});
+    unitSummaries.push({unit:u,bySys:bySys,totRFI:totRFI,totUnp:totUnp,totMaint:totMaint});
+  });
+
+  if(unitSummaries.length>0){
+    body+=`<div style="page-break-before:always;"></div>`;
+    body+=`<h1>Multi-Shop Quick Update</h1>`;
+    body+=`<div class="header-info">Combined view across all shops — Generated ${printed} ${printTime}</div>`;
+
+    // Per-unit summaries
+    unitSummaries.forEach(function(us){
+      body+=`<div class="section-title">${esc(us.unit.name||us.unit.id)}${us.unit.designation?' — '+esc(us.unit.designation):''}</div>`;
+      body+=`<table><thead><tr><th>System</th><th>RFI (Packed)</th><th>Unpacked</th><th>Maintenance</th><th>Total</th></tr></thead><tbody>`;
+      Object.keys(us.bySys).sort().forEach(function(sys){
+        var v=us.bySys[sys];
+        var tot=v.rfi+v.unpacked+v.maint;
+        if(tot===0) return;
+        body+=`<tr><td><strong>${sys}</strong></td><td>${v.rfi||'—'}</td><td>${v.unpacked||'—'}</td><td>${v.maint||'—'}</td><td><strong>${tot}</strong></td></tr>`;
+      });
+      body+=`<tr style="border-top:2px solid #333;"><td><strong>TOTAL</strong></td><td><strong>${us.totRFI}</strong></td><td><strong>${us.totUnp}</strong></td><td><strong>${us.totMaint}</strong></td><td><strong>${us.totRFI+us.totUnp+us.totMaint}</strong></td></tr>`;
+      body+=`</tbody></table>`;
+    });
+
+    // Combined totals across ALL units (current + others)
+    body+=`<div class="section-title">Combined Totals — All Shops</div>`;
+    var allSys={};
+    // Add current unit
+    S.sections.forEach(function(sec){
+      var sys=sec.systemType||'Unknown';
+      if(!allSys[sys]) allSys[sys]={rfi:0,unpacked:0,maint:0};
+      allSys[sys].rfi+=sec.rows.filter(function(r){return r.serialNumber&&r.packer&&!r._signedOut;}).length+Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
+      allSys[sys].unpacked+=sec.rows.filter(function(r){return !r.packer||!r.serialNumber;}).length;
+    });
+    STATUS_SYS.forEach(function(sys){
+      var maint=0;
+      (S.statusCounts[sys]?.maintenance||[]).forEach(function(e){maint+=(parseInt(e.count)||0);});
+      if(maint>0){ if(!allSys[sys]) allSys[sys]={rfi:0,unpacked:0,maint:0}; allSys[sys].maint+=maint; }
+    });
+    // Add other units
+    unitSummaries.forEach(function(us){
+      Object.keys(us.bySys).forEach(function(sys){
+        if(!allSys[sys]) allSys[sys]={rfi:0,unpacked:0,maint:0};
+        allSys[sys].rfi+=us.bySys[sys].rfi;
+        allSys[sys].unpacked+=us.bySys[sys].unpacked;
+        allSys[sys].maint+=us.bySys[sys].maint;
+      });
+    });
+    var grandRFI=0,grandUnp=0,grandMaint=0;
+    body+=`<table><thead><tr><th>System</th><th>RFI (Packed)</th><th>Unpacked</th><th>Maintenance</th><th>Total</th></tr></thead><tbody>`;
+    Object.keys(allSys).sort().forEach(function(sys){
+      var v=allSys[sys];
+      var tot=v.rfi+v.unpacked+v.maint;
+      if(tot===0) return;
+      grandRFI+=v.rfi; grandUnp+=v.unpacked; grandMaint+=v.maint;
+      body+=`<tr><td><strong>${sys}</strong></td><td>${v.rfi||'—'}</td><td>${v.unpacked||'—'}</td><td>${v.maint||'—'}</td><td><strong>${tot}</strong></td></tr>`;
+    });
+    body+=`<tr style="border-top:2px solid #333;background:#f0f0f0;"><td><strong>GRAND TOTAL</strong></td><td><strong>${grandRFI}</strong></td><td><strong>${grandUnp}</strong></td><td><strong>${grandMaint}</strong></td><td><strong>${grandRFI+grandUnp+grandMaint}</strong></td></tr>`;
+    body+=`</tbody></table>`;
+    body+=`<div style="font-size:10px;color:#888;margin-top:8px;">* Other shop data is from last sync to this device. Push to DB on each shop for latest counts.</div>`;
+    body+=`<div class="footer">Parachute Management System — Multi-Shop PSR Generated ${printed} ${printTime}</div>`;
+  }
+
+  openPrintPreview('Parachute Status Report (PSR)', body);
+}
 // ══ DATA EXPORT/IMPORT ══
 function exportData(){
   auditLog('export','Data Export','Exported full backup');
