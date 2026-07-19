@@ -2,7 +2,6 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1.8.4/dist/quagga.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <link rel="manifest" href="manifest.json">
@@ -639,6 +638,7 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 <script>
 const CFG = {
@@ -672,14 +672,7 @@ function populateSystemDropdown(){
 
 let S = { sections:[], binLocations:[], knownPackers:[], knownIPs:[], masterInventory:{}, statusCounts:{}, equipmentCounts:{}, mffData:{}, customCapacity:[], archive:{deletedRows:[],deletedSections:[],monthlyLogs:[]}, nextSectionId:1 };
 
-function getStorageKey(){
-  var uid=localStorage.getItem('pms_activeUnit');
-  if(!uid){
-    // Try first unit in list
-    try{var units=JSON.parse(localStorage.getItem('pms_units')||'[]');if(units.length>0)uid=units[0].id;}catch(e){}
-  }
-  return 'pms_data_'+(uid||'default');
-}
+function getStorageKey(){ return 'pms_data_'+(localStorage.getItem('pms_activeUnit')||'default'); }
 function load(){
   try{
     const d=localStorage.getItem(getStorageKey())||localStorage.getItem('paraOps4');
@@ -1194,97 +1187,13 @@ async function testDbMethods(){
 }
 
 function initSupabase() {
-  // Use direct REST fetch - no JS library needed
-  // Create a mock sbClient that uses fetch directly
-  function makeHeaders(extra){
-    return Object.assign({
-      'apikey': SUPABASE_KEY,
-      'Authorization': 'Bearer ' + SUPABASE_KEY,
-      'Content-Type': 'application/json',
-      'Prefer': 'return=representation'
-    }, extra||{});
+  if (window.supabase && window.supabase.createClient) {
+    sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    dbLog('Client initialized');
+    return true;
   }
-  function restUrl(table, query){
-    return SUPABASE_URL + '/rest/v1/' + table + (query?'?'+query:'');
-  }
-  sbClient = {
-    from: function(table){
-      var _filters=[], _select='*', _order=null, _limit=null;
-      var chain = {
-        select: function(cols){ _select=cols||'*'; return chain; },
-        order: function(col, opts){ _order=col+(opts&&opts.ascending===false?' desc':''); return chain; },
-        limit: function(n){ _limit=n; return chain; },
-        eq: function(col,val){ _filters.push(col+'=eq.'+encodeURIComponent(val)); return chain; },
-        neq: function(col,val){ _filters.push(col+'=neq.'+encodeURIComponent(val)); return chain; },
-        then: function(resolve,reject){
-          var q='select='+_select;
-          _filters.forEach(function(f){q+='&'+f;});
-          if(_order) q+='&order='+_order;
-          if(_limit) q+='&limit='+_limit;
-          fetch(restUrl(table,q),{method:'GET',headers:makeHeaders()})
-            .then(function(r){return r.json().then(function(d){return{data:r.ok?d:null,error:r.ok?null:{message:JSON.stringify(d)}};});})
-            .then(resolve).catch(function(e){resolve({data:null,error:{message:e.message}});});
-          return chain;
-        },
-        insert: function(rows){
-          var isArr=Array.isArray(rows);
-          var body=JSON.stringify(rows);
-          var ic={
-            select: function(){ return ic; },
-            then: function(resolve){
-              fetch(restUrl(table),{method:'POST',headers:makeHeaders({'Prefer':'return=representation'}),body:body})
-                .then(function(r){return r.json().then(function(d){return{data:r.ok?d:null,error:r.ok?null:{message:JSON.stringify(d)}};});})
-                .then(resolve).catch(function(e){resolve({data:null,error:{message:e.message}});});
-              return ic;
-            }
-          };
-          return ic;
-        },
-        update: function(updates){
-          var body=JSON.stringify(updates);
-          var uc={
-            eq: function(col,val){ _filters.push(col+'=eq.'+encodeURIComponent(val)); return uc; },
-            then: function(resolve){
-              var q=_filters.join('&');
-              fetch(restUrl(table,q),{method:'PATCH',headers:makeHeaders({'Prefer':'return=minimal'}),body:body})
-                .then(function(r){return r.ok?{data:null,error:null}:r.json().then(function(d){return{data:null,error:{message:JSON.stringify(d)}};});})
-                .then(resolve).catch(function(e){resolve({data:null,error:{message:e.message}});});
-              return uc;
-            }
-          };
-          return uc;
-        },
-        upsert: function(rows){
-          var body=JSON.stringify(Array.isArray(rows)?rows:[rows]);
-          var uc={
-            then: function(resolve){
-              fetch(restUrl(table),{method:'POST',headers:makeHeaders({'Prefer':'resolution=merge-duplicates,return=minimal'}),body:body})
-                .then(function(r){return r.ok?{data:null,error:null}:r.json().then(function(d){return{data:null,error:{message:JSON.stringify(d)}};});})
-                .then(resolve).catch(function(e){resolve({data:null,error:{message:e.message}});});
-              return uc;
-            }
-          };
-          return uc;
-        },
-        delete: function(){
-          var dc={
-            eq: function(col,val){ _filters.push(col+'=eq.'+encodeURIComponent(val)); return dc; },
-            then: function(resolve){
-              var q=_filters.join('&');
-              fetch(restUrl(table,q),{method:'DELETE',headers:makeHeaders({'Prefer':'return=minimal'})})
-                .then(function(r){return{data:null,error:r.ok?null:{message:'Delete failed: '+r.status}};})
-                .then(resolve).catch(function(e){resolve({data:null,error:{message:e.message}});});
-              return dc;
-            }
-          };
-          return dc;
-        }
-      };
-      return chain;
-    }
-  };
-  dbLog('Client initialized (direct REST)');
-  return true;
+  console.warn('Supabase library not loaded');
+  return false;
 }
 
 // ══ HELPER: Safe DB call with fallback ══
@@ -10382,17 +10291,7 @@ document.addEventListener('keydown',function(e){
 ensureDefaultAdmin();
 checkSession();
 populateLoginDropdown();
-try{load();}catch(e){console.error('load error:',e);}
-try{autoMonthlySnapshot();}catch(e){}
-try{updateDL();}catch(e){}
-try{updateBinDL();}catch(e){}
-try{renderStatusBar();}catch(e){console.error('renderStatusBar error:',e);}
-try{renderSections();}catch(e){console.error('renderSections error:',e);}
-try{renderHome();}catch(e){
-  console.error('renderHome error:',e);
-  var hc=document.getElementById('homeContent');
-  if(hc) hc.innerHTML='<div style="padding:20px;color:var(--danger);">Error loading home page. Check console. Error: '+e.message+'</div>';
-}
+load(); autoMonthlySnapshot(); updateDL(); updateBinDL(); renderStatusBar(); renderSections(); renderHome();
 
 // Initialize Supabase connection
 (async function(){
@@ -10401,22 +10300,20 @@ try{renderHome();}catch(e){
       dbReady = true;
       // Sync users from DB
       await syncUsers();
-      ensureDefaultAdmin();
       populateLoginDropdown();
-      // Sync units from DB FIRST so renderHome has units to show
-      await syncUnits();
-      // Re-render home now that we have units
-      try{renderHome();}catch(e){console.error('renderHome after syncUnits:',e);}
       // Resolve active unit
       await resolveUnitId();
       if(activeUnitId){
-        var loaded = await loadFromDB();
-        if(loaded){
-          try{localStorage.setItem(getStorageKey(),JSON.stringify(S));}catch(e){}
-          try{renderStatusBar();}catch(e){}
-          try{renderSections();}catch(e){}
-          try{renderHome();}catch(e){console.error('renderHome after loadFromDB:',e);}
-          dbLog('Loaded data from Supabase');
+        // Only load from DB if localStorage is empty (fresh browser)
+        var hasLocalData = !!localStorage.getItem(getStorageKey());
+        if(!hasLocalData){
+          var loaded = await loadFromDB();
+          if(loaded){
+            renderStatusBar(); renderSections(); renderHome();
+            dbLog('Loaded data from Supabase (fresh browser)');
+          }
+        } else {
+          dbLog('Using local data (DB sync available via Admin)');
         }
         await syncAuditLog();
       }
@@ -10424,15 +10321,23 @@ try{renderHome();}catch(e){
       dbLog('Supabase fully connected');
       var si=document.getElementById('dbStatus');
       if(si){si.textContent='\u{1F7E2}';si.title='Connected to database';}
+      await syncUnits();
+      await resolveUnitId();
+      if(activeUnitId){
+        var loaded=await loadFromDB();
+        if(loaded){
+          try{localStorage.setItem(getStorageKey(),JSON.stringify(S));}catch(e){}
+          renderAll();
+          dbLog('Cloud data loaded');
+        }
+      }
       startAutoSync();
     }
   } catch(e){
     console.error('Supabase init error:', e);
-    dbLog('Init error: '+e.message+' - Falling back to localStorage');
+    dbLog('Falling back to localStorage');
     var si=document.getElementById('dbStatus');
     if(si){si.textContent='\u{1F534}';si.title='Database offline - using local storage';}
-    // Still try to render with local data
-    try{renderHome();}catch(re){console.error('renderHome fallback error:',re);}
   }
 })();
 // ══ PWA SERVICE WORKER ══
