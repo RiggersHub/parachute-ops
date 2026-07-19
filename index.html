@@ -10288,7 +10288,17 @@ document.addEventListener('keydown',function(e){
 ensureDefaultAdmin();
 checkSession();
 populateLoginDropdown();
-load(); autoMonthlySnapshot(); updateDL(); updateBinDL(); renderStatusBar(); renderSections(); renderHome();
+try{load();}catch(e){console.error('load error:',e);}
+try{autoMonthlySnapshot();}catch(e){}
+try{updateDL();}catch(e){}
+try{updateBinDL();}catch(e){}
+try{renderStatusBar();}catch(e){console.error('renderStatusBar error:',e);}
+try{renderSections();}catch(e){console.error('renderSections error:',e);}
+try{renderHome();}catch(e){
+  console.error('renderHome error:',e);
+  var hc=document.getElementById('homeContent');
+  if(hc) hc.innerHTML='<div style="padding:20px;color:var(--danger);">Error loading home page. Check console. Error: '+e.message+'</div>';
+}
 
 // Initialize Supabase connection
 (async function(){
