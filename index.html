@@ -478,7 +478,7 @@
     <div class="page-header">
       <h1 class="page-title">PSR / Overview</h1>
       <div style="display:flex;gap:8px;">
-        <button class="btn btn-secondary" onclick="printPSR2()">🖨 Print PSR</button>
+        <button class="btn btn-secondary" onclick="openPSRPrintDialog()">🖨 Print PSR</button>
         <button class="btn btn-secondary" onclick="exportData()">💾 Export Data</button>
       </div>
     </div>
@@ -1951,18 +1951,33 @@ function doCreateAccount(){
   // Push to Supabase so other devices see the new pending account
   if(sbClient) saveUsersDB(users).then(function(){dbLog('New account saved to DB: '+username);}).catch(function(e){dbLog('Account DB save error: '+e.message);});
 
-  // Post announcement so admins see pending account on home page
+  // Post announcement to ALL unit announcement keys so every logged-in user sees it
   var announceText='🔔 New account request: '+lastName+' is pending approval.';
-  if(!S.announcements) S.announcements=[];
-  S.announcements.unshift({
+  var newAnnounce={
     id:'acct-'+Date.now(),
     text:announceText,
     author:'System',
     ts:new Date().toISOString(),
     _isPendingAccount:true,
     _pendingName:lastName
-  });
-  save();
+  };
+  // Write to every unit's announcement localStorage key
+  try{
+    var allUnits=getUnits();
+    if(allUnits.length===0){
+      // No units loaded yet — write to a global pending key
+      var pending=JSON.parse(localStorage.getItem('pms_pending_announcements')||'[]');
+      pending.unshift(newAnnounce);
+      localStorage.setItem('pms_pending_announcements',JSON.stringify(pending));
+    } else {
+      allUnits.forEach(function(u){
+        var key='pms_announcements_'+u.id;
+        var existing=JSON.parse(localStorage.getItem(key)||'[]');
+        existing.unshift(newAnnounce);
+        localStorage.setItem(key,JSON.stringify(existing));
+      });
+    }
+  }catch(e){}
 
   populateLoginDropdown();
   err.style.display='none';
@@ -2274,11 +2289,15 @@ function approveUser(userName){
   user.role='rigger';
   saveUsers(users);
   if(sbClient) saveUsersDB(users).catch(function(e){dbLog('approveUser DB error: '+e.message);});
-  // Remove the pending announcement for this user
-  if(S.announcements){
-    S.announcements=S.announcements.filter(function(a){return !(a._isPendingAccount&&a._pendingName===userName);});
-    save();
-  }
+  // Remove the pending announcement for this user from all unit keys
+  try{
+    getUnits().forEach(function(u){
+      var key='pms_announcements_'+u.id;
+      var existing=JSON.parse(localStorage.getItem(key)||'[]');
+      localStorage.setItem(key,JSON.stringify(existing.filter(function(a){return !(a._isPendingAccount&&a._pendingName===userName);})));
+    });
+    localStorage.removeItem('pms_pending_announcements');
+  }catch(e){}
   auditLog('config','User Approved','Approved user: '+userName);
   renderAdmin();
   try{renderHome();}catch(e){}
@@ -4750,6 +4769,20 @@ function renderHome(){
 
   const unit=getUnitInfo();
   const units=getUnits();
+
+  // Merge any pending announcements (created before login) into active unit key
+  try{
+    var pending=JSON.parse(localStorage.getItem('pms_pending_announcements')||'[]');
+    if(pending.length>0){
+      var key='pms_announcements_'+getActiveUnit();
+      var existing=JSON.parse(localStorage.getItem(key)||'[]');
+      var ids=existing.map(function(a){return a.id;});
+      pending.forEach(function(a){if(!ids.includes(a.id)) existing.unshift(a);});
+      localStorage.setItem(key,JSON.stringify(existing));
+      localStorage.removeItem('pms_pending_announcements');
+    }
+  }catch(e){}
+
   const announcements=JSON.parse(localStorage.getItem('pms_announcements_'+getActiveUnit())||'[]');
 
   const inputStyle='background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);padding:8px 12px;font-size:13px;font-family:inherit;outline:none;width:100%;';
@@ -6057,7 +6090,41 @@ function printPSR(){
   openPrintPreview('Parachute Status Report (PSR)', body);
 }
 // ══ PSR PRINT V2 — Clean two-page format ══
-function printPSR2(){
+function openPSRPrintDialog(){
+  // Check if user has access to multiple units
+  var allUnits=getUnits();
+  var userUnits=allUnits.filter(function(u){return canAccessUnit(u.id);});
+
+  // If only one unit or no DB connection, just print directly
+  if(userUnits.length<=1||!sbClient){
+    printPSR2([]);
+    return;
+  }
+
+  // Show dialog to select other units to include
+  var otherUnits=userUnits.filter(function(u){return u.id!==getActiveUnit();});
+  var is='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:7px 10px;font-size:12px;font-family:inherit;outline:none;width:100%;';
+  var html='<div style="text-align:left;font-size:13px;color:var(--text-muted);margin-bottom:12px;">Select other units to include in this PSR print:</div>';
+  otherUnits.forEach(function(u){
+    html+='<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">';
+    html+='<input type="checkbox" id="psrUnit-'+u.id+'" checked style="width:16px;height:16px;cursor:pointer;">';
+    html+='<label for="psrUnit-'+u.id+'" style="font-size:13px;cursor:pointer;">'+esc(u.name||u.id)+(u.designation?' <span style="color:var(--text-muted);font-size:11px;">('+esc(u.designation)+')</span>':'')+'</label>';
+    html+='</div>';
+  });
+
+  showConfirm('Print PSR', html, [
+    {label:'This Unit Only',cls:'btn-secondary',fn:function(){ printPSR2([]); }},
+    {label:'Print with Selected',cls:'btn-primary',fn:function(){
+      var selected=otherUnits.filter(function(u){
+        var cb=document.getElementById('psrUnit-'+u.id);
+        return cb&&cb.checked;
+      });
+      printPSR2(selected);
+    }}
+  ]);
+}
+
+function printPSR2(extraUnitsToFetch){
   const now=new Date();
   const printed=now.toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
   const printTime=now.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'});
@@ -6088,11 +6155,43 @@ function printPSR2(){
   }
 
   var currentCounts=computeCounts(S);
-  var otherUnits=getUnits().filter(function(u){return u.id!==getActiveUnit();});
+  var otherUnits=extraUnitsToFetch||[];
   var otherData=[];
-  otherUnits.forEach(function(u){
-    try{var d=JSON.parse(localStorage.getItem('pms_data_'+u.id)||'null');if(d)otherData.push({unit:u,counts:computeCounts(d),data:d});}catch(e){}
-  });
+
+  // For each extra unit, try Supabase first then fall back to localStorage
+  async function fetchAndPrint(){
+    for(var i=0;i<otherUnits.length;i++){
+      var u=otherUnits[i];
+      var uData=null;
+      // Try localStorage first (fast)
+      try{uData=JSON.parse(localStorage.getItem('pms_data_'+u.id)||'null');}catch(e){}
+      // If not in localStorage and DB connected, fetch from Supabase
+      if(!uData&&sbClient&&u._dbId){
+        try{
+          var prevId=activeUnitId;
+          activeUnitId=u._dbId;
+          var tempS={sections:[],statusCounts:{},equipmentCounts:{},signedOut:[],abnOps:[]};
+          var result=await loadFromDB();
+          if(result) uData=JSON.parse(JSON.stringify(S));
+          activeUnitId=prevId;
+          // Restore current unit's data
+          try{var saved=localStorage.getItem('pms_data_'+getActiveUnit());if(saved) Object.assign(S,JSON.parse(saved));}catch(e){}
+        }catch(e){dbLog('Failed to fetch '+u.id+' for print: '+e.message);}
+      }
+      if(uData) otherData.push({unit:u,counts:computeCounts(uData)});
+    }
+    buildAndOpenPSRPrint(printed,printTime,nowD,unitInfo,currentCounts,otherData);
+  }
+
+  if(otherUnits.length>0){
+    fetchAndPrint();
+    return;
+  }
+
+  buildAndOpenPSRPrint(printed,printTime,nowD,unitInfo,currentCounts,[]);
+}
+
+function buildAndOpenPSRPrint(printed,printTime,nowD,unitInfo,currentCounts,otherData){
 
   var allSys={};
   function mergeSys(bySys){Object.keys(bySys).forEach(function(s){allSys[s]=1;});}
