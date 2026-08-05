@@ -5106,7 +5106,8 @@ function renderPSR(){
   // Total On Hand — full-width card on its own row
   html+=`<div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:12px;text-align:center;">
     <div style="font-size:28px;font-weight:700;color:var(--accent);">${totalCap}</div>
-    <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">Total On Hand</div>
+    <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Total On Hand</div>
+    <div style="margin-bottom:10px;"><button onclick="syncCapacityToActual()" style="background:none;border:1px solid var(--accent);border-radius:4px;color:var(--accent);cursor:pointer;font-size:10px;padding:3px 10px;font-family:inherit;">⟳ Sync to Actual</button></div>
     <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
       ${onHandBox('T-11',actualT11,capT11,"S.capacityT11=parseInt(this.value)||0;save();renderPSR();")}
       ${onHandBox('T-11R',actualT11R,capT11R,"S.capacityT11R=parseInt(this.value)||0;save();renderPSR();")}
@@ -5150,8 +5151,8 @@ function renderPSR(){
       unpackedBySystem[sec.systemType].bins.push({bin:sec.binLocation,count:unpacked});
     }
   });
-  // Also add status counts popped entries as unpacked
-  STATUS_SYS.forEach(sys=>{
+  // Also add status counts popped entries as unpacked — iterate ALL keys not just STATUS_SYS
+  Object.keys(S.statusCounts||{}).forEach(function(sys){
     (S.statusCounts[sys]?.popped||[]).forEach(e=>{
       const cnt=parseInt(e.count)||0;
       if(cnt>0){
@@ -5205,6 +5206,35 @@ function renderPSR(){
     }
 
     html+=`</div>`;
+  }
+
+  // ── Maintenance by System ──
+  const maintBySystem={};
+  Object.keys(S.statusCounts||{}).forEach(function(sys){
+    (S.statusCounts[sys]?.maintenance||[]).forEach(function(e){
+      const cnt=parseInt(e.count)||0;
+      if(cnt>0){
+        if(!maintBySystem[sys]) maintBySystem[sys]={total:0,bins:[]};
+        maintBySystem[sys].total+=cnt;
+        maintBySystem[sys].bins.push({bin:e.bin||'—',count:cnt});
+      }
+    });
+  });
+  if(Object.keys(maintBySystem).length>0){
+    let maintGrand=0;
+    html+=`<div class="psr-section">
+      <div class="psr-section-title">🔧 Maintenance by System</div>
+      <table class="psr-table"><thead><tr><th>System</th><th>Bin / Description</th><th>Qty</th></tr></thead><tbody>`;
+    Object.keys(maintBySystem).sort().forEach(function(sys){
+      const m=maintBySystem[sys];
+      maintGrand+=m.total;
+      m.bins.forEach(function(b,bi){
+        html+=`<tr><td>${bi===0?'<strong>'+sys+'</strong>':''}</td><td>${esc(b.bin)}</td><td>${b.count}</td></tr>`;
+      });
+      if(m.bins.length>1) html+=`<tr style="border-top:1px dashed var(--border);"><td></td><td><em>subtotal</em></td><td><strong>${m.total}</strong></td></tr>`;
+    });
+    html+=`<tr style="border-top:2px solid var(--border);"><td><strong>TOTAL</strong></td><td></td><td><strong>${maintGrand}</strong></td></tr>`;
+    html+=`</tbody></table></div>`;
   }
 
   // ── Expiration Alerts (summarized by bin) ──
@@ -5446,6 +5476,52 @@ function goToBin(secId){
     card.style.boxShadow='0 0 0 2px var(--accent)';
     setTimeout(()=>card.style.boxShadow='',3000);
   }
+}
+
+function syncCapacityToActual(){
+  // Set all On Hand capacity numbers to match current actual counts
+  function countReal(sec){ return sec.rows.filter(function(r){return r.serialNumber&&r.packer;}).length; }
+  var t11=0,t11r=0,t11rsp=0,mc6=0,ra1=0,ra1r=0,ra1dbsl=0;
+  S.sections.forEach(function(sec){
+    var cnt=countReal(sec)+(parseInt(sec.bulkCount)||0);
+    if(sec.systemType==='T-11') t11+=cnt;
+    else if(sec.systemType==='T-11R') t11r+=cnt;
+    else if(sec.systemType==='T-11R SP') t11rsp+=cnt;
+    else if(sec.systemType==='MC-6') mc6+=cnt;
+    else if(sec.systemType==='RA-1') ra1+=cnt;
+    else if(sec.systemType==='RA-1R') ra1r+=cnt;
+    else if(sec.systemType==='RA-1 DBSL') ra1dbsl+=cnt;
+  });
+  // Add popped and maintenance counts
+  STATUS_SYS.forEach(function(sys){
+    var pop=0,maint=0;
+    (S.statusCounts[sys]?.popped||[]).forEach(function(e){pop+=(parseInt(e.count)||0);});
+    (S.statusCounts[sys]?.maintenance||[]).forEach(function(e){maint+=(parseInt(e.count)||0);});
+    var tot=pop+maint;
+    if(tot===0) return;
+    if(sys==='T-11') t11+=tot;
+    else if(sys==='T-11R/SP') t11r+=tot;
+    else if(sys==='MC-6') mc6+=tot;
+    else if(sys==='RA-1') ra1+=tot;
+    else if(sys==='RA-1R') ra1r+=tot;
+    else if(sys==='RA-1 DBSL') ra1dbsl+=tot;
+  });
+  S.capacityT11=t11;
+  S.capacityT11R=t11r;
+  S.capacityT11RSP=t11rsp;
+  S.capacityMC6=mc6;
+  S.capacityRA1=ra1;
+  S.capacityRA1R=ra1r;
+  S.capacityRA1DBSL=ra1dbsl;
+  // Sync custom capacity too
+  (S.customCapacity||[]).forEach(function(cc){
+    var ccAct=0;
+    S.sections.forEach(function(s){if(s.systemType===cc.sys) ccAct+=countReal(s)+(parseInt(s.bulkCount)||0);});
+    cc.cap=ccAct;
+  });
+  save();
+  renderPSR();
+  toast('On Hand numbers synced to actual counts','success');
 }
 
 function addCustomCapacity(){
