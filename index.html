@@ -1948,10 +1948,22 @@ function doCreateAccount(){
   users.push(newUser);
   saveUsers(users);
 
-  // Push to Supabase so other devices see the new pending account
-  if(sbClient) saveUsersDB(users).then(function(){dbLog('New account saved to DB: '+username);}).catch(function(e){dbLog('Account DB save error: '+e.message);});
+  // Push ONLY the new user to Supabase — don't do full sync which could delete others
+  if(sbClient){
+    dbCall(async function(){
+      var dbRow={name:username, last_name:lastName, role:'pending', pin:pin, email:''};
+      // Check if already exists
+      var existing=await sbClient.from('pms_users').select('id').eq('name',username);
+      if(existing&&existing.data&&existing.data.length>0){
+        await sbClient.from('pms_users').update(dbRow).eq('name',username);
+      } else {
+        await sbClient.from('pms_users').insert(dbRow);
+      }
+      dbLog('New pending account saved to DB: '+username);
+    }).catch(function(e){dbLog('Account DB save error: '+(e&&e.message||e));});
+  }
 
-  // Post announcement to ALL unit announcement keys so every logged-in user sees it
+  // Write announcement to global key + all unit keys so everyone sees it
   var announceText='🔔 New account request: '+lastName+' is pending approval.';
   var newAnnounce={
     id:'acct-'+Date.now(),
@@ -1961,22 +1973,20 @@ function doCreateAccount(){
     _isPendingAccount:true,
     _pendingName:lastName
   };
-  // Write to every unit's announcement localStorage key
   try{
-    var allUnits=getUnits();
-    if(allUnits.length===0){
-      // No units loaded yet — write to a global pending key
-      var pending=JSON.parse(localStorage.getItem('pms_pending_announcements')||'[]');
-      pending.unshift(newAnnounce);
-      localStorage.setItem('pms_pending_announcements',JSON.stringify(pending));
-    } else {
-      allUnits.forEach(function(u){
-        var key='pms_announcements_'+u.id;
-        var existing=JSON.parse(localStorage.getItem(key)||'[]');
+    // Global pending key — checked by renderHome on every load
+    var pending=JSON.parse(localStorage.getItem('pms_pending_announcements')||'[]');
+    pending.unshift(newAnnounce);
+    localStorage.setItem('pms_pending_announcements',JSON.stringify(pending));
+    // Also write to any unit keys already in localStorage
+    getUnits().forEach(function(u){
+      var key='pms_announcements_'+u.id;
+      var existing=JSON.parse(localStorage.getItem(key)||'[]');
+      if(!existing.find(function(a){return a.id===newAnnounce.id;})){
         existing.unshift(newAnnounce);
         localStorage.setItem(key,JSON.stringify(existing));
-      });
-    }
+      }
+    });
   }catch(e){}
 
   populateLoginDropdown();
@@ -2331,6 +2341,27 @@ function toggleUnitAccess(userName, unitId, granted){
 }
 
 function renderAdmin(){
+  // Sync users from DB first so pending accounts from other devices show up
+  if(sbClient){
+    getUsersDB().then(function(dbUsers){
+      if(dbUsers&&dbUsers.length>0){
+        // Preserve local master admin pin
+        var localUsers=getUsers();
+        var localZink=localUsers.find(function(u){return u.name==='Zink';});
+        dbUsers=dbUsers.map(function(u){
+          if(u.name==='Zink'&&localZink&&localZink.pin) u.pin=localZink.pin;
+          return u;
+        });
+        localStorage.setItem('pms_users',JSON.stringify(dbUsers));
+      }
+      renderAdminContent();
+    }).catch(function(){renderAdminContent();});
+  } else {
+    renderAdminContent();
+  }
+}
+
+function renderAdminContent(){
   var ul=document.getElementById('usersList');
   if(ul){
     var users=getUsers();
@@ -4770,14 +4801,14 @@ function renderHome(){
   const unit=getUnitInfo();
   const units=getUnits();
 
-  // Merge any pending announcements (created before login) into active unit key
+  // Merge pending announcements into active unit key
   try{
     var pending=JSON.parse(localStorage.getItem('pms_pending_announcements')||'[]');
     if(pending.length>0){
       var key='pms_announcements_'+getActiveUnit();
       var existing=JSON.parse(localStorage.getItem(key)||'[]');
       var ids=existing.map(function(a){return a.id;});
-      pending.forEach(function(a){if(!ids.includes(a.id)) existing.unshift(a);});
+      pending.forEach(function(a){if(ids.indexOf(a.id)===-1) existing.unshift(a);});
       localStorage.setItem(key,JSON.stringify(existing));
       localStorage.removeItem('pms_pending_announcements');
     }
@@ -6091,19 +6122,15 @@ function printPSR(){
 }
 // ══ PSR PRINT V2 — Clean two-page format ══
 function openPSRPrintDialog(){
-  // Check if user has access to multiple units
   var allUnits=getUnits();
-  var userUnits=allUnits.filter(function(u){return canAccessUnit(u.id);});
+  var otherUnits=allUnits.filter(function(u){return u.id!==getActiveUnit();});
 
-  // If only one unit or no DB connection, just print directly
-  if(userUnits.length<=1||!sbClient){
+  // If only one unit, just print directly
+  if(otherUnits.length===0){
     printPSR2([]);
     return;
   }
 
-  // Show dialog to select other units to include
-  var otherUnits=userUnits.filter(function(u){return u.id!==getActiveUnit();});
-  var is='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:7px 10px;font-size:12px;font-family:inherit;outline:none;width:100%;';
   var html='<div style="text-align:left;font-size:13px;color:var(--text-muted);margin-bottom:12px;">Select other units to include in this PSR print:</div>';
   otherUnits.forEach(function(u){
     html+='<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);">';
