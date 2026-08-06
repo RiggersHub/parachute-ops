@@ -1812,8 +1812,8 @@ async function syncUsers(){
 }
 function saveUsers(users){
   localStorage.setItem('pms_users', JSON.stringify(users));
-  // Async save to Supabase
-  if(sbClient) saveUsersDB(users).then(function(){dbLog('Users saved to DB');}).catch(function(e){dbLog('saveUsers ERROR: '+e.message);});
+  // Don't auto-push to DB here — only push from explicit admin actions
+  // to avoid overwriting pending users that exist in DB but not locally
 }
 function ensureDefaultAdmin(){
   var users=getUsers();
@@ -2766,8 +2766,13 @@ document.getElementById('btnAddSection').addEventListener('click',()=>{
   populateSystemDropdown();
   binSel.innerHTML='<option value="">Select bin...</option>';
   S.binLocations.forEach(b=>{ binSel.innerHTML+=`<option value="${b}">${b}</option>`; });
-  newBinIn.style.display='none'; newBinIn.value=''; sysSel.value=''; numIn.value='';
-  hint.textContent='Select a system type to auto-fill'; addModal.classList.add('active');
+  newBinIn.style.display='none'; newBinIn.value=''; numIn.value='';
+  // Pre-select system type from active tab
+  var activeTab=localStorage.getItem('pms_rpr_tab')||'';
+  if(activeTab&&sysSel){ sysSel.value=activeTab; if(CFG[activeTab]){numIn.value=CFG[activeTab].maxBin;} }
+  else { sysSel.value=''; }
+  hint.textContent=sysSel.value?'Auto-filled from active tab':'Select a system type to auto-fill';
+  addModal.classList.add('active');
 });
 document.getElementById('btnNewBin').addEventListener('click',()=>{
   newBinIn.style.display=newBinIn.style.display==='none'?'':'none';
@@ -2797,6 +2802,7 @@ document.getElementById('btnConfirmSection').addEventListener('click',()=>{
   if(!S.binLocations.includes(bin)){ S.binLocations.push(bin); updateBinDL(); }
   auditLog('section','Add Section','Created section: '+bin+' ('+sys+', max '+num+')');
   S.sections.unshift({id:S.nextSectionId++, binLocation:bin, systemType:sys, maxChutes:num, rows:[], createdAt:new Date().toISOString()});
+  localStorage.setItem('pms_rpr_tab',sys);
   save(); addModal.classList.remove('active'); renderSections(); toast(`Created: ${bin} — ${sys}`);
 });
 
@@ -2920,8 +2926,61 @@ function renderSections(){
   const c=document.getElementById('sectionsContainer'), e=document.getElementById('emptyState');
   if(S.sections.length===0){ c.innerHTML=''; if(e){e.style.display='';c.appendChild(e);} return; }
   if(e) e.style.display='none';
-  c.innerHTML=S.sections.map(s=>sectionHTML(s)).join('');
+
+  // Group sections by systemType
+  var groups={};
+  var groupOrder=[];
+  S.sections.forEach(function(sec){
+    var sys=sec.systemType||'Other';
+    if(!groups[sys]){ groups[sys]=[]; groupOrder.push(sys); }
+    groups[sys].push(sec);
+  });
+
+  // Sort bins within each group by earliest expiration date (soonest first)
+  function getSectionEarliestExp(sec){
+    var dates=[];
+    if(sec.bulkExpDate) dates.push(sec.bulkExpDate);
+    sec.rows.forEach(function(r){ if(r.expirationDate) dates.push(r.expirationDate); });
+    return dates.length>0?dates.sort()[0]:'9999-99-99';
+  }
+  Object.keys(groups).forEach(function(sys){
+    groups[sys].sort(function(a,b){ return getSectionEarliestExp(a).localeCompare(getSectionEarliestExp(b)); });
+  });
+
+  // Get active tab from localStorage or default to first
+  var activeTab=localStorage.getItem('pms_rpr_tab')||groupOrder[0];
+  if(!groups[activeTab]) activeTab=groupOrder[0];
+
+  // Build tabs
+  var html='<div style="display:flex;flex-wrap:wrap;gap:0;margin-bottom:-1px;position:relative;z-index:1;">';
+  groupOrder.forEach(function(sys){
+    var isActive=sys===activeTab;
+    var totalPacked=groups[sys].reduce(function(sum,sec){
+      return sum+sec.rows.filter(function(r){return r.serialNumber&&r.packer&&!r._signedOut;}).length+Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
+    },0);
+    html+='<div onclick="switchRPRTab(\''+sys+'\')" style="padding:8px 16px;font-size:13px;border:0.5px solid var(--border);border-bottom:'+(isActive?'0.5px solid var(--bg-card)':'0.5px solid var(--border)')+';border-radius:8px 8px 0 0;cursor:pointer;margin-right:2px;background:'+(isActive?'var(--bg-card)':'var(--bg-secondary)')+';color:'+(isActive?'var(--accent)':'var(--text-muted)')+';">';
+    html+=sys;
+    html+=' <span style="font-size:10px;padding:1px 6px;border-radius:10px;background:var(--accent-dim);color:var(--accent);margin-left:4px;">'+totalPacked+'</span>';
+    html+='</div>';
+  });
+  html+='</div>';
+
+  // Build active tab content
+  html+='<div style="border:0.5px solid var(--border);border-radius:0 8px 8px 8px;padding:16px;background:var(--bg-card);">';
+  html+='<div style="display:flex;justify-content:flex-end;margin-bottom:12px;">';
+  html+='<button class="btn btn-secondary" onclick="addSection(\''+(activeTab||'')+'\')">+ Add Bin</button>';
+  html+='</div>';
+  html+=groups[activeTab].map(function(s){return sectionHTML(s);}).join('');
+  html+='</div>';
+
+  c.innerHTML=html;
 }
+
+function switchRPRTab(sys){
+  localStorage.setItem('pms_rpr_tab',sys);
+  renderSections();
+}
+
 
 function badge(t){ if(t.startsWith('MC'))return'badge-mc6'; if(t==='T-11')return'badge-t11'; if(t.startsWith('T-11R'))return'badge-t11r'; if(t.startsWith('RA'))return'badge-ra1'; return''; }
 
@@ -4803,18 +4862,29 @@ function renderHome(){
 
   // Merge pending announcements into active unit key
   try{
+    var activeUnitKey='pms_announcements_'+getActiveUnit();
     var pending=JSON.parse(localStorage.getItem('pms_pending_announcements')||'[]');
-    if(pending.length>0){
-      var key='pms_announcements_'+getActiveUnit();
-      var existing=JSON.parse(localStorage.getItem(key)||'[]');
+    if(pending.length>0&&getActiveUnit()&&getActiveUnit()!=='default'||pending.length>0&&getUnits().length>0){
+      var existing=JSON.parse(localStorage.getItem(activeUnitKey)||'[]');
       var ids=existing.map(function(a){return a.id;});
-      pending.forEach(function(a){if(ids.indexOf(a.id)===-1) existing.unshift(a);});
-      localStorage.setItem(key,JSON.stringify(existing));
+      var added=false;
+      pending.forEach(function(a){
+        if(ids.indexOf(a.id)===-1){existing.unshift(a);added=true;}
+      });
+      if(added) localStorage.setItem(activeUnitKey,JSON.stringify(existing));
       localStorage.removeItem('pms_pending_announcements');
     }
   }catch(e){}
 
+  // Also show pending announcements directly even if not merged yet
+  var pendingAnnouncements=[];
+  try{pendingAnnouncements=JSON.parse(localStorage.getItem('pms_pending_announcements')||'[]');}catch(e){}
   const announcements=JSON.parse(localStorage.getItem('pms_announcements_'+getActiveUnit())||'[]');
+  // Merge pending into display list without removing from storage
+  var allAnnouncements=announcements.slice();
+  pendingAnnouncements.forEach(function(a){
+    if(!allAnnouncements.find(function(x){return x.id===a.id;})) allAnnouncements.unshift(a);
+  });
 
   const inputStyle='background:var(--bg-input);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);padding:8px 12px;font-size:13px;font-family:inherit;outline:none;width:100%;';
 
@@ -4897,21 +4967,21 @@ function renderHome(){
     }
   }
 
-  // Announcements
   html+=`<div class="psr-section">
     <div class="psr-section-title">📢 Announcements <button class="btn btn-sm btn-secondary" onclick="addAnnouncement()" style="margin-left:8px;">+ Add</button></div>`;
-  if(announcements.length>0){
-    announcements.slice().reverse().forEach((a,ri)=>{
-      const i=announcements.length-1-ri;
-      html+=`<div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:10px;background:var(--bg-input);">
+  if(allAnnouncements.length>0){
+    allAnnouncements.slice().reverse().forEach((a,ri)=>{
+      const i=allAnnouncements.length-1-ri;
+      var isPending=a._isPendingAccount;
+      html+=`<div style="border:1px solid ${isPending?'var(--warning)':'var(--border)'};border-radius:8px;padding:12px;margin-bottom:10px;background:${isPending?'var(--bg-warning)':'var(--bg-input)'};">
         <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:6px;">
-          <div style="font-size:12px;font-weight:600;color:var(--accent);">${esc(a.title||'Announcement')}</div>
+          <div style="font-size:12px;font-weight:600;color:${isPending?'var(--warning)':'var(--accent)'};">${esc(a.title||a.text||'Announcement')}</div>
           <div style="display:flex;gap:6px;align-items:center;">
-            <span style="font-size:10px;color:var(--text-muted);">${a.date||''}</span>
-            <button class="row-action-btn delete" onclick="deleteAnnouncement(${i})" title="Delete">🗑</button>
+            <span style="font-size:10px;color:var(--text-muted);">${a.date||a.ts?new Date(a.ts||a.date).toLocaleDateString():''}</span>
+            ${!isPending?`<button class="row-action-btn delete" onclick="deleteAnnouncement(${i})" title="Delete">🗑</button>`:''}
           </div>
         </div>
-        <div style="font-size:12px;color:var(--text-secondary);white-space:pre-wrap;">${esc(a.body||'')}</div>
+        <div style="font-size:12px;color:var(--text-secondary);white-space:pre-wrap;">${esc(a.body||a.text||'')}</div>
       </div>`;
     });
   } else {
