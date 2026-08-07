@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.21.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.40.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -1230,17 +1230,14 @@ async function getUsersDB() {
 }
 
 async function saveUsersDB(users) {
-  // Always save to localStorage as cache
-  localStorage.setItem('pms_users', JSON.stringify(users));
-  
   if (!sbClient) return;
-  dbLog('Saving '+users.length+' users to DB...');
+  if(!users) users=getUsers();
+  dbLog('Saving '+users.length+' users to DB (merge only)...');
   await dbCall(async () => {
     // Get existing users from DB
     var { data: existing } = await sbClient.from('pms_users').select('id, name');
     var existingMap = {};
     if (existing) existing.forEach(u => { existingMap[u.name] = u.id; });
-    
     for (var i = 0; i < users.length; i++) {
       var u = users[i];
       var dbRow = {
@@ -1251,18 +1248,11 @@ async function saveUsersDB(users) {
         email: u.email || ''
       };
       if (existingMap[u.name]) {
-        // Update existing
         await sbClient.from('pms_users').update(dbRow).eq('id', existingMap[u.name]);
-        delete existingMap[u.name];
       } else {
-        // Insert new
         await sbClient.from('pms_users').insert(dbRow);
       }
-    }
-    // Delete removed users
-    var toDelete = Object.values(existingMap);
-    for (var d = 0; d < toDelete.length; d++) {
-      await sbClient.from('pms_users').delete().eq('id', toDelete[d]);
+      // NOTE: Never delete users from DB here — only explicit deleteUser() action should do that
     }
   });
 }
@@ -2105,6 +2095,7 @@ function showAddUser(){
        if(users.find(function(u){return u.name.toLowerCase()===name.toLowerCase();})){toast('Last name already exists','error');return;}
        users.push({name:name,lastName:lastName,role:role,pin:pin});
        saveUsers(users);
+       if(sbClient) saveUsersDB(users);
        auditLog('config','User Added','Added user: '+lastName+' ('+role+')');
        renderAdmin();
        toast('User added','success');
@@ -2152,6 +2143,7 @@ function editUserRole(name){
          user.pin=newPin;
        }
        saveUsers(users);
+       if(sbClient) saveUsersDB(users);
        auditLog('config','User Edited','Changed '+(user.lastName||name)+': role '+oldRole+' -> '+(user.role==='masteradmin'?'admin':user.role)+(newPin?' (PIN changed)':''));
        renderAdmin();
        toast('User updated','success');
@@ -2175,6 +2167,10 @@ function deleteUser(name){
        var deletedCopy=JSON.parse(JSON.stringify(tu));
        users=getUsers().filter(function(u){return u.name!==name;});
        saveUsers(users);
+       // Explicitly delete from DB
+       if(sbClient) dbCall(async function(){
+         await sbClient.from('pms_users').delete().eq('name',name);
+       });
        auditLog('config','User Deleted','Removed user: '+(deletedCopy.lastName||name));
        renderAdmin();
        toast((deletedCopy.lastName||name)+' deleted','warning',10000,{label:'Undo',fn:function(){
@@ -2295,10 +2291,32 @@ function exportAuditLog(){
 function approveUser(userName){
   var users=getUsers();
   var user=users.find(function(u){return u.name===userName;});
+  if(!user&&sbClient){
+    // User not in localStorage — fetch from DB first then approve
+    getUsersDB().then(function(dbUsers){
+      if(dbUsers&&dbUsers.length>0){
+        localStorage.setItem('pms_users',JSON.stringify(dbUsers));
+        approveUser(userName); // retry now that DB users are loaded
+      } else {
+        toast('User not found in database','error');
+      }
+    }).catch(function(){toast('Could not reach database','error');});
+    return;
+  }
   if(!user){toast('User not found','error');return;}
-  user.role='rigger';
-  saveUsers(users);
-  if(sbClient) saveUsersDB(users).catch(function(e){dbLog('approveUser DB error: '+e.message);});
+  // Re-read fresh in case we just synced from DB
+  var freshUsers=getUsers();
+  var freshUser=freshUsers.find(function(u){return u.name===userName;});
+  if(!freshUser){toast('User not found after sync','error');return;}
+  freshUser.role='rigger';
+  saveUsers(freshUsers);
+  // Push only this user's update to DB
+  if(sbClient) dbCall(async function(){
+    var existing=await sbClient.from('pms_users').select('id').eq('name',userName);
+    if(existing&&existing.data&&existing.data.length>0){
+      await sbClient.from('pms_users').update({role:'rigger'}).eq('name',userName);
+    }
+  }).catch(function(e){dbLog('approveUser DB error: '+(e&&e.message||e));});
   // Remove the pending announcement for this user from all unit keys
   try{
     getUnits().forEach(function(u){
@@ -2309,7 +2327,7 @@ function approveUser(userName){
     localStorage.removeItem('pms_pending_announcements');
   }catch(e){}
   auditLog('config','User Approved','Approved user: '+userName);
-  renderAdmin();
+  renderAdminContent();
   try{renderHome();}catch(e){}
   populateLoginDropdown();
   toast(userName+' approved as rigger','success');
@@ -2341,18 +2359,23 @@ function toggleUnitAccess(userName, unitId, granted){
 }
 
 function renderAdmin(){
-  // Sync users from DB first so pending accounts from other devices show up
+  var el=document.getElementById('page-admin');
+  if(!el||el.style.display==='none') return;
   if(sbClient){
     getUsersDB().then(function(dbUsers){
       if(dbUsers&&dbUsers.length>0){
-        // Preserve local master admin pin
+        // Merge DB users with local — preserve local Zink pin, add anyone missing locally
         var localUsers=getUsers();
         var localZink=localUsers.find(function(u){return u.name==='Zink';});
-        dbUsers=dbUsers.map(function(u){
+        var merged=dbUsers.map(function(u){
           if(u.name==='Zink'&&localZink&&localZink.pin) u.pin=localZink.pin;
           return u;
         });
-        localStorage.setItem('pms_users',JSON.stringify(dbUsers));
+        // Add any local-only users not yet in DB (shouldn't happen but safety net)
+        localUsers.forEach(function(lu){
+          if(!merged.find(function(m){return m.name===lu.name;})) merged.push(lu);
+        });
+        localStorage.setItem('pms_users',JSON.stringify(merged));
       }
       renderAdminContent();
     }).catch(function(){renderAdminContent();});
@@ -2947,9 +2970,10 @@ function renderSections(){
     groups[sys].sort(function(a,b){ return getSectionEarliestExp(a).localeCompare(getSectionEarliestExp(b)); });
   });
 
-  // Get active tab from localStorage or default to first
-  var activeTab=localStorage.getItem('pms_rpr_tab')||groupOrder[0];
-  if(!groups[activeTab]) activeTab=groupOrder[0];
+  // Get active tab - always fall back to first group that has sections
+  var storedTab=localStorage.getItem('pms_rpr_tab');
+  var activeTab=(storedTab&&groups[storedTab])?storedTab:groupOrder[0];
+  localStorage.setItem('pms_rpr_tab',activeTab);
 
   // Build tabs
   var html='<div style="display:flex;flex-wrap:wrap;gap:0;margin-bottom:-1px;position:relative;z-index:1;">';
@@ -4982,6 +5006,7 @@ function renderHome(){
           </div>
         </div>
         <div style="font-size:12px;color:var(--text-secondary);white-space:pre-wrap;">${esc(a.body||a.text||'')}</div>
+        ${isPending&&(currentUser&&(currentUser.role==='admin'||currentUser.role==='masteradmin'))?`<div style="margin-top:8px;"><button class="btn btn-primary btn-sm" onclick="approveUser('${esc(a._pendingName||'')}');renderHome();" style="font-size:11px;padding:3px 12px;">✓ Approve ${esc(a._pendingName||'')}</button></div>`:''}
       </div>`;
     });
   } else {
@@ -6296,15 +6321,15 @@ function buildAndOpenPSRPrint(printed,printTime,nowD,unitInfo,currentCounts,othe
   otherData.forEach(function(od){mergeSys(od.counts.bySys);});
   var sysList=Object.keys(allSys).sort();
 
-  var unitCols=[{label:esc(unitInfo.name||'This Unit'),counts:currentCounts}];
-  otherData.forEach(function(od){unitCols.push({label:esc(od.unit.name||od.unit.id),counts:od.counts});});
+  var unitCols=[{label:(unitInfo.name||'This Unit').toUpperCase(),counts:currentCounts}];
+  otherData.forEach(function(od){unitCols.push({label:(od.unit.name||od.unit.id).toUpperCase(),counts:od.counts});});
 
   var body='';
   body+='<h1>Parachute Status Report</h1>';
   body+='<div class="header-info"><strong>'+esc(unitInfo.name||'—')+'</strong>'+(unitInfo.designation?' — '+esc(unitInfo.designation):'')+' &nbsp;|&nbsp; Printed: '+printed+' '+printTime+'</div>';
 
   // RFI table
-  body+='<div class="section-title">✅ RFI — Ready for Issue (Packed)</div>';
+  body+='<div class="section-title">RFI</div>';
   body+='<table><thead><tr><th>System</th>';
   unitCols.forEach(function(uc){body+='<th style="text-align:right;">'+uc.label+'</th>';});
   body+='<th style="text-align:right;background:#e5e7eb;">TOTAL</th></tr></thead><tbody>';
@@ -6320,10 +6345,10 @@ function buildAndOpenPSRPrint(printed,printTime,nowD,unitInfo,currentCounts,othe
   });
   body+='<tr style="border-top:2px solid #333;background:#e5e7eb;"><td><strong>TOTAL RFI</strong></td>';
   unitCols.forEach(function(uc){body+='<td style="text-align:right;"><strong>'+uc.counts.totRFI+'</strong></td>';});
-  body+='<td style="text-align:right;"><strong>'+grandRFI+'</strong></td></tr></tbody></table>';
+  body+='<td style="text-align:right;"><strong>'+grandRFI+'</strong></td></tr></tbody></table>';body+='<div style="text-align:right;font-size:12px;font-weight:700;margin-top:4px;">TOTAL RFI: '+grandRFI+'</div>';
 
   // Unpacked + Maintenance table
-  body+='<div class="section-title" style="margin-top:20px;">📦 Unpacked + Maintenance</div>';
+  body+='<div class="section-title" style="margin-top:20px;">UNPACKED + MAINTENANCE</div>';
   body+='<table><thead><tr><th>System</th>';
   unitCols.forEach(function(uc){body+='<th style="text-align:right;">'+uc.label+'</th>';});
   body+='<th style="text-align:right;background:#e5e7eb;">TOTAL</th></tr></thead><tbody>';
@@ -6339,10 +6364,10 @@ function buildAndOpenPSRPrint(printed,printTime,nowD,unitInfo,currentCounts,othe
   });
   body+='<tr style="border-top:2px solid #333;background:#e5e7eb;"><td><strong>TOTAL</strong></td>';
   unitCols.forEach(function(uc){body+='<td style="text-align:right;"><strong>'+(uc.counts.totUnp+uc.counts.totMaint)+'</strong></td>';});
-  body+='<td style="text-align:right;"><strong>'+grandUnp+'</strong></td></tr></tbody></table>';
+  body+='<td style="text-align:right;"><strong>'+grandUnp+'</strong></td></tr></tbody></table>';body+='<div style="text-align:right;font-size:12px;font-weight:700;margin-top:4px;">TOTAL UNPACKED: '+grandUnp+'</div>';
 
   // Grand total
-  body+='<table style="margin-top:12px;"><thead><tr><th>System</th>';
+  body+='<div class="section-title" style="margin-top:20px;">ON HAND</div>';body+='<table style="margin-top:4px;"><thead><tr><th>System</th>';
   unitCols.forEach(function(uc){body+='<th style="text-align:right;">'+uc.label+' Total</th>';});
   body+='<th style="text-align:right;background:#d1d5db;">ALL UNITS</th></tr></thead><tbody>';
   var grandAll=0;
@@ -6357,7 +6382,7 @@ function buildAndOpenPSRPrint(printed,printTime,nowD,unitInfo,currentCounts,othe
   });
   body+='<tr style="border-top:2px solid #333;background:#d1d5db;"><td><strong>GRAND TOTAL</strong></td>';
   unitCols.forEach(function(uc){body+='<td style="text-align:right;"><strong>'+(uc.counts.totRFI+uc.counts.totUnp+uc.counts.totMaint)+'</strong></td>';});
-  body+='<td style="text-align:right;"><strong>'+grandAll+'</strong></td></tr></tbody></table>';
+  body+='<td style="text-align:right;"><strong>'+grandAll+'</strong></td></tr></tbody></table>';body+='<div style="text-align:right;font-size:12px;font-weight:700;margin-top:4px;">TOTAL ON HAND: '+grandAll+'</div>';
   if(otherData.length>0) body+='<div style="font-size:10px;color:#888;margin-top:6px;">* Other unit data from last device sync.</div>';
   body+='<div class="footer">Parachute Management System — PSR Generated '+printed+' '+printTime+'</div>';
 
@@ -10535,7 +10560,10 @@ function startAutoSync(){
   _autoSyncInterval=setInterval(async function(){
     if(!sbClient||!activeUnitId||!currentUser) return;
     if(_savingToDB) return; // Don't pull while pushing
-    if(_localDirty) return; // Don't pull when there are unsaved local changes — wait for them to push first
+    if(_localDirty) return; // Don't pull when there are unsaved local changes
+    // Don't pull from DB if user is actively on RPR tab - could lose unsaved row edits
+    var curTab=document.querySelector('.nav-tab.active');
+    if(curTab&&curTab.dataset.page==='sections') return;
     try{
       var success=await loadFromDB();
       if(success){
