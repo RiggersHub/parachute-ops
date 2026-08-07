@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.30.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.40.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -2291,10 +2291,28 @@ function exportAuditLog(){
 function approveUser(userName){
   var users=getUsers();
   var user=users.find(function(u){return u.name===userName;});
+  if(!user&&sbClient){
+    // User not in localStorage — fetch from DB first then approve
+    getUsersDB().then(function(dbUsers){
+      if(dbUsers&&dbUsers.length>0){
+        localStorage.setItem('pms_users',JSON.stringify(dbUsers));
+        approveUser(userName); // retry now that DB users are loaded
+      } else {
+        toast('User not found in database','error');
+      }
+    }).catch(function(){toast('Could not reach database','error');});
+    return;
+  }
   if(!user){toast('User not found','error');return;}
   user.role='rigger';
   saveUsers(users);
-  if(sbClient) saveUsersDB(users).catch(function(e){dbLog('approveUser DB error: '+e.message);});
+  // Push only this user's update to DB
+  if(sbClient) dbCall(async function(){
+    var existing=await sbClient.from('pms_users').select('id').eq('name',userName);
+    if(existing&&existing.data&&existing.data.length>0){
+      await sbClient.from('pms_users').update({role:'rigger'}).eq('name',userName);
+    }
+  }).catch(function(e){dbLog('approveUser DB error: '+(e&&e.message||e));});
   // Remove the pending announcement for this user from all unit keys
   try{
     getUnits().forEach(function(u){
@@ -2305,7 +2323,7 @@ function approveUser(userName){
     localStorage.removeItem('pms_pending_announcements');
   }catch(e){}
   auditLog('config','User Approved','Approved user: '+userName);
-  renderAdmin();
+  renderAdminContent();
   try{renderHome();}catch(e){}
   populateLoginDropdown();
   toast(userName+' approved as rigger','success');
@@ -2337,18 +2355,23 @@ function toggleUnitAccess(userName, unitId, granted){
 }
 
 function renderAdmin(){
-  // Sync users from DB first so pending accounts from other devices show up
+  var el=document.getElementById('page-admin');
+  if(!el||el.style.display==='none') return;
   if(sbClient){
     getUsersDB().then(function(dbUsers){
       if(dbUsers&&dbUsers.length>0){
-        // Preserve local master admin pin
+        // Merge DB users with local — preserve local Zink pin, add anyone missing locally
         var localUsers=getUsers();
         var localZink=localUsers.find(function(u){return u.name==='Zink';});
-        dbUsers=dbUsers.map(function(u){
+        var merged=dbUsers.map(function(u){
           if(u.name==='Zink'&&localZink&&localZink.pin) u.pin=localZink.pin;
           return u;
         });
-        localStorage.setItem('pms_users',JSON.stringify(dbUsers));
+        // Add any local-only users not yet in DB (shouldn't happen but safety net)
+        localUsers.forEach(function(lu){
+          if(!merged.find(function(m){return m.name===lu.name;})) merged.push(lu);
+        });
+        localStorage.setItem('pms_users',JSON.stringify(merged));
       }
       renderAdminContent();
     }).catch(function(){renderAdminContent();});
@@ -2943,9 +2966,10 @@ function renderSections(){
     groups[sys].sort(function(a,b){ return getSectionEarliestExp(a).localeCompare(getSectionEarliestExp(b)); });
   });
 
-  // Get active tab from localStorage or default to first
-  var activeTab=localStorage.getItem('pms_rpr_tab')||groupOrder[0];
-  if(!groups[activeTab]) activeTab=groupOrder[0];
+  // Get active tab - always fall back to first group that has sections
+  var storedTab=localStorage.getItem('pms_rpr_tab');
+  var activeTab=(storedTab&&groups[storedTab])?storedTab:groupOrder[0];
+  localStorage.setItem('pms_rpr_tab',activeTab);
 
   // Build tabs
   var html='<div style="display:flex;flex-wrap:wrap;gap:0;margin-bottom:-1px;position:relative;z-index:1;">';
