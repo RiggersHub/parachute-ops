@@ -4978,6 +4978,7 @@ function renderHome(){
           </div>
         </div>
         <div style="font-size:12px;color:var(--text-secondary);white-space:pre-wrap;">${esc(a.body||a.text||'')}</div>
+        ${isPending&&(currentUser&&(currentUser.role==='admin'||currentUser.role==='masteradmin'))?`<div style="margin-top:8px;"><button class="btn btn-primary btn-sm" onclick="approveUser('${esc(a._pendingName||'')}');renderHome();" style="font-size:11px;padding:3px 12px;">✓ Approve ${esc(a._pendingName||'')}</button></div>`:''}
       </div>`;
     });
   } else {
@@ -6292,15 +6293,15 @@ function buildAndOpenPSRPrint(printed,printTime,nowD,unitInfo,currentCounts,othe
   otherData.forEach(function(od){mergeSys(od.counts.bySys);});
   var sysList=Object.keys(allSys).sort();
 
-  var unitCols=[{label:esc(unitInfo.name||'This Unit'),counts:currentCounts}];
-  otherData.forEach(function(od){unitCols.push({label:esc(od.unit.name||od.unit.id),counts:od.counts});});
+  var unitCols=[{label:(unitInfo.name||'This Unit').toUpperCase(),counts:currentCounts}];
+  otherData.forEach(function(od){unitCols.push({label:(od.unit.name||od.unit.id).toUpperCase(),counts:od.counts});});
 
   var body='';
   body+='<h1>Parachute Status Report</h1>';
   body+='<div class="header-info"><strong>'+esc(unitInfo.name||'—')+'</strong>'+(unitInfo.designation?' — '+esc(unitInfo.designation):'')+' &nbsp;|&nbsp; Printed: '+printed+' '+printTime+'</div>';
 
   // RFI table
-  body+='<div class="section-title">✅ RFI — Ready for Issue (Packed)</div>';
+  body+='<div class="section-title">RFI</div>';
   body+='<table><thead><tr><th>System</th>';
   unitCols.forEach(function(uc){body+='<th style="text-align:right;">'+uc.label+'</th>';});
   body+='<th style="text-align:right;background:#e5e7eb;">TOTAL</th></tr></thead><tbody>';
@@ -6316,10 +6317,10 @@ function buildAndOpenPSRPrint(printed,printTime,nowD,unitInfo,currentCounts,othe
   });
   body+='<tr style="border-top:2px solid #333;background:#e5e7eb;"><td><strong>TOTAL RFI</strong></td>';
   unitCols.forEach(function(uc){body+='<td style="text-align:right;"><strong>'+uc.counts.totRFI+'</strong></td>';});
-  body+='<td style="text-align:right;"><strong>'+grandRFI+'</strong></td></tr></tbody></table>';
+  body+='<td style="text-align:right;"><strong>'+grandRFI+'</strong></td></tr></tbody></table>';body+='<div style="text-align:right;font-size:12px;font-weight:700;margin-top:4px;">TOTAL RFI: '+grandRFI+'</div>';
 
   // Unpacked + Maintenance table
-  body+='<div class="section-title" style="margin-top:20px;">📦 Unpacked + Maintenance</div>';
+  body+='<div class="section-title" style="margin-top:20px;">UNPACKED + MAINTENANCE</div>';
   body+='<table><thead><tr><th>System</th>';
   unitCols.forEach(function(uc){body+='<th style="text-align:right;">'+uc.label+'</th>';});
   body+='<th style="text-align:right;background:#e5e7eb;">TOTAL</th></tr></thead><tbody>';
@@ -6335,10 +6336,10 @@ function buildAndOpenPSRPrint(printed,printTime,nowD,unitInfo,currentCounts,othe
   });
   body+='<tr style="border-top:2px solid #333;background:#e5e7eb;"><td><strong>TOTAL</strong></td>';
   unitCols.forEach(function(uc){body+='<td style="text-align:right;"><strong>'+(uc.counts.totUnp+uc.counts.totMaint)+'</strong></td>';});
-  body+='<td style="text-align:right;"><strong>'+grandUnp+'</strong></td></tr></tbody></table>';
+  body+='<td style="text-align:right;"><strong>'+grandUnp+'</strong></td></tr></tbody></table>';body+='<div style="text-align:right;font-size:12px;font-weight:700;margin-top:4px;">TOTAL UNPACKED: '+grandUnp+'</div>';
 
   // Grand total
-  body+='<table style="margin-top:12px;"><thead><tr><th>System</th>';
+  body+='<div class="section-title" style="margin-top:20px;">ON HAND</div>';body+='<table style="margin-top:4px;"><thead><tr><th>System</th>';
   unitCols.forEach(function(uc){body+='<th style="text-align:right;">'+uc.label+' Total</th>';});
   body+='<th style="text-align:right;background:#d1d5db;">ALL UNITS</th></tr></thead><tbody>';
   var grandAll=0;
@@ -6353,7 +6354,7 @@ function buildAndOpenPSRPrint(printed,printTime,nowD,unitInfo,currentCounts,othe
   });
   body+='<tr style="border-top:2px solid #333;background:#d1d5db;"><td><strong>GRAND TOTAL</strong></td>';
   unitCols.forEach(function(uc){body+='<td style="text-align:right;"><strong>'+(uc.counts.totRFI+uc.counts.totUnp+uc.counts.totMaint)+'</strong></td>';});
-  body+='<td style="text-align:right;"><strong>'+grandAll+'</strong></td></tr></tbody></table>';
+  body+='<td style="text-align:right;"><strong>'+grandAll+'</strong></td></tr></tbody></table>';body+='<div style="text-align:right;font-size:12px;font-weight:700;margin-top:4px;">TOTAL ON HAND: '+grandAll+'</div>';
   if(otherData.length>0) body+='<div style="font-size:10px;color:#888;margin-top:6px;">* Other unit data from last device sync.</div>';
   body+='<div class="footer">Parachute Management System — PSR Generated '+printed+' '+printTime+'</div>';
 
@@ -10531,7 +10532,10 @@ function startAutoSync(){
   _autoSyncInterval=setInterval(async function(){
     if(!sbClient||!activeUnitId||!currentUser) return;
     if(_savingToDB) return; // Don't pull while pushing
-    if(_localDirty) return; // Don't pull when there are unsaved local changes — wait for them to push first
+    if(_localDirty) return; // Don't pull when there are unsaved local changes
+    // Don't pull from DB if user is actively on RPR tab - could lose unsaved row edits
+    var curTab=document.querySelector('.nav-tab.active');
+    if(curTab&&curTab.dataset.page==='sections') return;
     try{
       var success=await loadFromDB();
       if(success){
