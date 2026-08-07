@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.21.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.30.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -1230,17 +1230,14 @@ async function getUsersDB() {
 }
 
 async function saveUsersDB(users) {
-  // Always save to localStorage as cache
-  localStorage.setItem('pms_users', JSON.stringify(users));
-  
   if (!sbClient) return;
-  dbLog('Saving '+users.length+' users to DB...');
+  if(!users) users=getUsers();
+  dbLog('Saving '+users.length+' users to DB (merge only)...');
   await dbCall(async () => {
     // Get existing users from DB
     var { data: existing } = await sbClient.from('pms_users').select('id, name');
     var existingMap = {};
     if (existing) existing.forEach(u => { existingMap[u.name] = u.id; });
-    
     for (var i = 0; i < users.length; i++) {
       var u = users[i];
       var dbRow = {
@@ -1251,18 +1248,11 @@ async function saveUsersDB(users) {
         email: u.email || ''
       };
       if (existingMap[u.name]) {
-        // Update existing
         await sbClient.from('pms_users').update(dbRow).eq('id', existingMap[u.name]);
-        delete existingMap[u.name];
       } else {
-        // Insert new
         await sbClient.from('pms_users').insert(dbRow);
       }
-    }
-    // Delete removed users
-    var toDelete = Object.values(existingMap);
-    for (var d = 0; d < toDelete.length; d++) {
-      await sbClient.from('pms_users').delete().eq('id', toDelete[d]);
+      // NOTE: Never delete users from DB here — only explicit deleteUser() action should do that
     }
   });
 }
@@ -2105,6 +2095,7 @@ function showAddUser(){
        if(users.find(function(u){return u.name.toLowerCase()===name.toLowerCase();})){toast('Last name already exists','error');return;}
        users.push({name:name,lastName:lastName,role:role,pin:pin});
        saveUsers(users);
+       if(sbClient) saveUsersDB(users);
        auditLog('config','User Added','Added user: '+lastName+' ('+role+')');
        renderAdmin();
        toast('User added','success');
@@ -2152,6 +2143,7 @@ function editUserRole(name){
          user.pin=newPin;
        }
        saveUsers(users);
+       if(sbClient) saveUsersDB(users);
        auditLog('config','User Edited','Changed '+(user.lastName||name)+': role '+oldRole+' -> '+(user.role==='masteradmin'?'admin':user.role)+(newPin?' (PIN changed)':''));
        renderAdmin();
        toast('User updated','success');
@@ -2175,6 +2167,10 @@ function deleteUser(name){
        var deletedCopy=JSON.parse(JSON.stringify(tu));
        users=getUsers().filter(function(u){return u.name!==name;});
        saveUsers(users);
+       // Explicitly delete from DB
+       if(sbClient) dbCall(async function(){
+         await sbClient.from('pms_users').delete().eq('name',name);
+       });
        auditLog('config','User Deleted','Removed user: '+(deletedCopy.lastName||name));
        renderAdmin();
        toast((deletedCopy.lastName||name)+' deleted','warning',10000,{label:'Undo',fn:function(){
@@ -10602,4 +10598,3 @@ if('serviceWorker' in navigator){
 </script>
 </body>
 </html>
- 
