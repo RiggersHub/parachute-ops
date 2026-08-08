@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.50.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.60.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -1444,13 +1444,13 @@ async function loadFromDB() {
       if(extra.paraRequests) S.paraRequests=extra.paraRequests;
       if(extra.archivedRequests) S.archivedRequests=extra.archivedRequests;
       if(extra.archivedSignOuts) S.archivedSignOuts=extra.archivedSignOuts;
-      if(extra.capacityT11) S.capacityT11=extra.capacityT11;
-      if(extra.capacityT11R) S.capacityT11R=extra.capacityT11R;
-      if(extra.capacityMC6) S.capacityMC6=extra.capacityMC6;
-      if(extra.capacityRA1) S.capacityRA1=extra.capacityRA1;
-      if(extra.capacityRA1R) S.capacityRA1R=extra.capacityRA1R;
-      if(extra.capacityRA1DBSL) S.capacityRA1DBSL=extra.capacityRA1DBSL;
-      if(extra.capacityT11RSP) S.capacityT11RSP=extra.capacityT11RSP;
+      if(extra.capacityT11!==undefined) S.capacityT11=extra.capacityT11;
+      if(extra.capacityT11R!==undefined) S.capacityT11R=extra.capacityT11R;
+      if(extra.capacityMC6!==undefined) S.capacityMC6=extra.capacityMC6;
+      if(extra.capacityRA1!==undefined) S.capacityRA1=extra.capacityRA1;
+      if(extra.capacityRA1R!==undefined) S.capacityRA1R=extra.capacityRA1R;
+      if(extra.capacityRA1DBSL!==undefined) S.capacityRA1DBSL=extra.capacityRA1DBSL;
+      if(extra.capacityT11RSP!==undefined) S.capacityT11RSP=extra.capacityT11RSP;
       if(extra.customCapacity) S.customCapacity=extra.customCapacity;
       if(extra.mffData) S.mffData=extra.mffData;
       // Restore bulk dates — covers both new DB columns and legacy fallback
@@ -2289,30 +2289,28 @@ function exportAuditLog(){
 
 
 function approveUser(userName){
+  var nameLower=userName.toLowerCase();
   var users=getUsers();
-  var user=users.find(function(u){return u.name===userName;});
+  var user=users.find(function(u){return u.name.toLowerCase()===nameLower;});
   if(!user&&sbClient){
-    // Not in localStorage — fetch from DB first
     toast('Fetching user from database…','success',2000);
     getUsersDB().then(function(dbUsers){
       if(!dbUsers||!dbUsers.length){toast('User not found in database','error');return;}
-      // Merge into localStorage
       var localZink=getUsers().find(function(u){return u.name==='Zink';});
       var merged=dbUsers.map(function(u){
         if(u.name==='Zink'&&localZink&&localZink.pin) u.pin=localZink.pin;
         return u;
       });
       localStorage.setItem('pms_users',JSON.stringify(merged));
-      // Now approve
       var refreshed=getUsers();
-      var target=refreshed.find(function(u){return u.name===userName;});
-      if(!target){toast('User '+userName+' not found even after DB sync','error');return;}
-      _doApproveUser(target, refreshed, userName);
+      var target=refreshed.find(function(u){return u.name.toLowerCase()===nameLower;});
+      if(!target){toast('User "'+userName+'" not found even after DB sync','error');return;}
+      _doApproveUser(target,refreshed,target.name);
     }).catch(function(e){toast('Database error: '+(e&&e.message||'unknown'),'error');});
     return;
   }
   if(!user){toast('User not found','error');return;}
-  _doApproveUser(user, users, userName);
+  _doApproveUser(user,users,user.name);
 }
 
 function _doApproveUser(user, users, userName){
