@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.70.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.80.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -1212,7 +1212,7 @@ async function dbCall(fn) {
 
 async function getUsersDB() {
   var result = await dbCall(async () => {
-    dbLog('Fetching users...'); var { data, error } = await sbClient.from('pms_users').select('*').order('created_at');
+    dbLog('Fetching users...'); var { data, error } = await sbClient.from('pms_users').select('*');
     if (error) {dbLog('Users error: '+JSON.stringify(error)); throw error;}
     dbLog('Got '+((data||[]).length)+' users from DB'); return data || [];
   });
@@ -1226,7 +1226,9 @@ async function getUsersDB() {
       _dbId: u.id
     }));
   }
-  return JSON.parse(localStorage.getItem('pms_users') || '[]');
+  // Return null if DB returned nothing - don't fall back to localStorage
+  // so callers know the DB fetch actually failed vs returned empty
+  return result === null ? null : [];
 }
 
 async function saveUsersDB(users) {
@@ -5694,6 +5696,13 @@ function syncCapacityToActual(){
   });
   S.capacityT11=t11;
   S.capacityT11R=t11r;
+  // T-11R SP = sections + tracker popped/maint (T-11R/SP key)
+  t11rsp+=(function(){
+    var p=0;
+    (S.statusCounts['T-11R/SP']?.popped||[]).forEach(function(e){p+=(parseInt(e.count)||0);});
+    (S.statusCounts['T-11R/SP']?.maintenance||[]).forEach(function(e){p+=(parseInt(e.count)||0);});
+    return p;
+  })();
   S.capacityT11RSP=t11rsp;
   S.capacityMC6=mc6;
   S.capacityRA1=ra1;
