@@ -5224,15 +5224,15 @@ function renderPSR(){
   else S.sections.forEach(sec=>{
     if(sec.systemType==='RA-1 DBSL') actualRA1DBSL+=countRealRows(sec)+(parseInt(sec.bulkCount)||0);
   });
-  // Add popped + maintenance per system
+  // Add popped + maintenance per system to actuals
+  // T-11: uses 'T-11' key
   ['T-11'].forEach(sys=>{
     (S.statusCounts[sys]?.popped||[]).forEach(e=>actualT11+=(parseInt(e.count)||0));
     (S.statusCounts[sys]?.maintenance||[]).forEach(e=>actualT11+=(parseInt(e.count)||0));
   });
-  ['T-11R/SP'].forEach(sys=>{
-    (S.statusCounts[sys]?.popped||[]).forEach(e=>actualT11R+=(parseInt(e.count)||0));
-    (S.statusCounts[sys]?.maintenance||[]).forEach(e=>actualT11R+=(parseInt(e.count)||0));
-  });
+  // T-11R: uses 'T-11R' key (NOT T-11R/SP — that goes to T-11RSP box)
+  // No tracker entries for plain T-11R — they all go under T-11R/SP key
+  // MC-6
   ['MC-6'].forEach(sys=>{
     (S.statusCounts[sys]?.popped||[]).forEach(e=>actualMC6+=(parseInt(e.count)||0));
     (S.statusCounts[sys]?.maintenance||[]).forEach(e=>actualMC6+=(parseInt(e.count)||0));
@@ -5261,17 +5261,6 @@ function renderPSR(){
   S.sections.forEach(function(s){if(s.systemType==='T-11R SP') actualT11RSP+=countRealRows(s)+(parseInt(s.bulkCount)||0);});
   (S.statusCounts['T-11R/SP']?.popped||[]).forEach(e=>actualT11RSP+=(parseInt(e.count)||0));
   (S.statusCounts['T-11R/SP']?.maintenance||[]).forEach(e=>actualT11RSP+=(parseInt(e.count)||0));
-  // Remove from T-11R so no double count (T-11R/SP tracker was already added to T-11R above)
-  // Reset T-11R popped/maint to not include what we just added to T-11RSP
-  // Actually split: T-11R/SP tracker goes to T-11RSP, not T-11R
-  // Recalculate T-11R without T-11R/SP tracker entries
-  if(ec['T-11R']&&ec['T-11R'].auth){
-    // auth mode: leave as is
-  } else {
-    // Remove what was added from T-11R/SP tracker since it now goes to T-11RSP
-    (S.statusCounts['T-11R/SP']?.popped||[]).forEach(e=>actualT11R-=(parseInt(e.count)||0));
-    (S.statusCounts['T-11R/SP']?.maintenance||[]).forEach(e=>actualT11R-=(parseInt(e.count)||0));
-  }
   const totalCap=capT11+capT11R+capT11RSP+capMC6+capRA1+capRA1R+capRA1DBSL+customCapTotal;
   const totalActual=actualT11+actualT11R+actualT11RSP+actualMC6+actualRA1+actualRA1R+actualRA1DBSL+customActTotal;
   const diffT11=actualT11-capT11, diffT11R=actualT11R-capT11R, diffT11RSP=actualT11RSP-capT11RSP, diffMC6=actualMC6-capMC6, diffRA1=actualRA1-capRA1, diffRA1R=actualRA1R-capRA1R, diffRA1DBSL=actualRA1DBSL-capRA1DBSL;
@@ -5680,7 +5669,7 @@ function syncCapacityToActual(){
     else if(sec.systemType==='RA-1R') ra1r+=cnt;
     else if(sec.systemType==='RA-1 DBSL') ra1dbsl+=cnt;
   });
-  // Add popped and maintenance counts
+  // Add popped and maintenance counts per system
   STATUS_SYS.forEach(function(sys){
     var pop=0,maint=0;
     (S.statusCounts[sys]?.popped||[]).forEach(function(e){pop+=(parseInt(e.count)||0);});
@@ -5688,7 +5677,7 @@ function syncCapacityToActual(){
     var tot=pop+maint;
     if(tot===0) return;
     if(sys==='T-11') t11+=tot;
-    else if(sys==='T-11R/SP') t11r+=tot;
+    else if(sys==='T-11R/SP') t11rsp+=tot; // T-11R/SP tracker -> T-11R SP box only
     else if(sys==='MC-6') mc6+=tot;
     else if(sys==='RA-1') ra1+=tot;
     else if(sys==='RA-1R') ra1r+=tot;
@@ -5696,13 +5685,6 @@ function syncCapacityToActual(){
   });
   S.capacityT11=t11;
   S.capacityT11R=t11r;
-  // T-11R SP = sections + tracker popped/maint (T-11R/SP key)
-  t11rsp+=(function(){
-    var p=0;
-    (S.statusCounts['T-11R/SP']?.popped||[]).forEach(function(e){p+=(parseInt(e.count)||0);});
-    (S.statusCounts['T-11R/SP']?.maintenance||[]).forEach(function(e){p+=(parseInt(e.count)||0);});
-    return p;
-  })();
   S.capacityT11RSP=t11rsp;
   S.capacityMC6=mc6;
   S.capacityRA1=ra1;
