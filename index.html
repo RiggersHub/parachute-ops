@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.60.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.70.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -1938,20 +1938,28 @@ function doCreateAccount(){
   users.push(newUser);
   saveUsers(users);
 
-  // Push ONLY the new user to Supabase — don't do full sync which could delete others
-  if(sbClient){
-    dbCall(async function(){
-      var dbRow={name:username, last_name:lastName, role:'pending', pin:pin, email:''};
-      // Check if already exists
-      var existing=await sbClient.from('pms_users').select('id').eq('name',username);
-      if(existing&&existing.data&&existing.data.length>0){
-        await sbClient.from('pms_users').update(dbRow).eq('name',username);
-      } else {
-        await sbClient.from('pms_users').insert(dbRow);
-      }
-      dbLog('New pending account saved to DB: '+username);
-    }).catch(function(e){dbLog('Account DB save error: '+(e&&e.message||e));});
+  // Push new user to Supabase — wait for sbClient if not ready yet, then retry
+  function pushUserToDB(retriesLeft){
+    if(sbClient){
+      dbCall(async function(){
+        var dbRow={name:username, last_name:lastName, role:'pending', pin:pin, email:''};
+        var existing=await sbClient.from('pms_users').select('id').eq('name',username);
+        if(existing&&existing.data&&existing.data.length>0){
+          await sbClient.from('pms_users').update(dbRow).eq('name',username);
+        } else {
+          await sbClient.from('pms_users').insert(dbRow);
+        }
+        dbLog('New pending account saved to DB: '+username);
+      }).catch(function(e){dbLog('Account DB save error: '+(e&&e.message||e));});
+    } else if(retriesLeft>0){
+      // sbClient not ready yet — wait 1 second and retry
+      setTimeout(function(){ pushUserToDB(retriesLeft-1); }, 1000);
+      dbLog('Waiting for DB connection to save new account ('+retriesLeft+' retries left)');
+    } else {
+      dbLog('ERROR: Could not save new account to DB — sbClient never became available');
+    }
   }
+  pushUserToDB(10); // retry up to 10 times (10 seconds)
 
   // Write announcement to global key + all unit keys so everyone sees it
   var announceText='🔔 New account request: '+lastName+' is pending approval.';
@@ -5196,7 +5204,7 @@ function renderPSR(){
   });
   if(ec['T-11R']&&ec['T-11R'].auth) actualT11R=parseInt(ec['T-11R'].auth)||0;
   else S.sections.forEach(sec=>{
-    if(sec.systemType==='T-11R'||sec.systemType==='T-11R SP') actualT11R+=countRealRows(sec)+(parseInt(sec.bulkCount)||0);
+    if(sec.systemType==='T-11R') actualT11R+=countRealRows(sec)+(parseInt(sec.bulkCount)||0);
   });
   if(ec['MC-6']&&ec['MC-6'].auth) actualMC6=parseInt(ec['MC-6'].auth)||0;
   else S.sections.forEach(sec=>{
@@ -5246,8 +5254,22 @@ function renderPSR(){
   let customCapTotal=customCaps.reduce(function(a,cc){return a+(parseInt(cc.cap)||0);},0);
   let customActTotal=0;
   customCaps.forEach(function(cc){S.sections.forEach(function(s){if(s.systemType===cc.sys) customActTotal+=countRealRows(s)+(parseInt(s.bulkCount)||0);});});
-  // T-11R SP actual
-  let actualT11RSP=0; S.sections.forEach(function(s){if(s.systemType==='T-11R SP') actualT11RSP+=countRealRows(s)+(parseInt(s.bulkCount)||0);});
+  // T-11R SP actual — sections + popped/maintenance from tracker
+  let actualT11RSP=0;
+  S.sections.forEach(function(s){if(s.systemType==='T-11R SP') actualT11RSP+=countRealRows(s)+(parseInt(s.bulkCount)||0);});
+  (S.statusCounts['T-11R/SP']?.popped||[]).forEach(e=>actualT11RSP+=(parseInt(e.count)||0));
+  (S.statusCounts['T-11R/SP']?.maintenance||[]).forEach(e=>actualT11RSP+=(parseInt(e.count)||0));
+  // Remove from T-11R so no double count (T-11R/SP tracker was already added to T-11R above)
+  // Reset T-11R popped/maint to not include what we just added to T-11RSP
+  // Actually split: T-11R/SP tracker goes to T-11RSP, not T-11R
+  // Recalculate T-11R without T-11R/SP tracker entries
+  if(ec['T-11R']&&ec['T-11R'].auth){
+    // auth mode: leave as is
+  } else {
+    // Remove what was added from T-11R/SP tracker since it now goes to T-11RSP
+    (S.statusCounts['T-11R/SP']?.popped||[]).forEach(e=>actualT11R-=(parseInt(e.count)||0));
+    (S.statusCounts['T-11R/SP']?.maintenance||[]).forEach(e=>actualT11R-=(parseInt(e.count)||0));
+  }
   const totalCap=capT11+capT11R+capT11RSP+capMC6+capRA1+capRA1R+capRA1DBSL+customCapTotal;
   const totalActual=actualT11+actualT11R+actualT11RSP+actualMC6+actualRA1+actualRA1R+actualRA1DBSL+customActTotal;
   const diffT11=actualT11-capT11, diffT11R=actualT11R-capT11R, diffT11RSP=actualT11RSP-capT11RSP, diffMC6=actualMC6-capMC6, diffRA1=actualRA1-capRA1, diffRA1R=actualRA1R-capRA1R, diffRA1DBSL=actualRA1DBSL-capRA1DBSL;
