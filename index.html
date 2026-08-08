@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.40.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.50.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -2292,32 +2292,37 @@ function approveUser(userName){
   var users=getUsers();
   var user=users.find(function(u){return u.name===userName;});
   if(!user&&sbClient){
-    // User not in localStorage — fetch from DB first then approve
+    // Not in localStorage — fetch from DB first
+    toast('Fetching user from database…','success',2000);
     getUsersDB().then(function(dbUsers){
-      if(dbUsers&&dbUsers.length>0){
-        localStorage.setItem('pms_users',JSON.stringify(dbUsers));
-        approveUser(userName); // retry now that DB users are loaded
-      } else {
-        toast('User not found in database','error');
-      }
-    }).catch(function(){toast('Could not reach database','error');});
+      if(!dbUsers||!dbUsers.length){toast('User not found in database','error');return;}
+      // Merge into localStorage
+      var localZink=getUsers().find(function(u){return u.name==='Zink';});
+      var merged=dbUsers.map(function(u){
+        if(u.name==='Zink'&&localZink&&localZink.pin) u.pin=localZink.pin;
+        return u;
+      });
+      localStorage.setItem('pms_users',JSON.stringify(merged));
+      // Now approve
+      var refreshed=getUsers();
+      var target=refreshed.find(function(u){return u.name===userName;});
+      if(!target){toast('User '+userName+' not found even after DB sync','error');return;}
+      _doApproveUser(target, refreshed, userName);
+    }).catch(function(e){toast('Database error: '+(e&&e.message||'unknown'),'error');});
     return;
   }
   if(!user){toast('User not found','error');return;}
-  // Re-read fresh in case we just synced from DB
-  var freshUsers=getUsers();
-  var freshUser=freshUsers.find(function(u){return u.name===userName;});
-  if(!freshUser){toast('User not found after sync','error');return;}
-  freshUser.role='rigger';
-  saveUsers(freshUsers);
-  // Push only this user's update to DB
+  _doApproveUser(user, users, userName);
+}
+
+function _doApproveUser(user, users, userName){
+  user.role='rigger';
+  saveUsers(users);
+  // Update only this user in DB
   if(sbClient) dbCall(async function(){
-    var existing=await sbClient.from('pms_users').select('id').eq('name',userName);
-    if(existing&&existing.data&&existing.data.length>0){
-      await sbClient.from('pms_users').update({role:'rigger'}).eq('name',userName);
-    }
+    await sbClient.from('pms_users').update({role:'rigger'}).eq('name',userName);
   }).catch(function(e){dbLog('approveUser DB error: '+(e&&e.message||e));});
-  // Remove the pending announcement for this user from all unit keys
+  // Remove pending announcements
   try{
     getUnits().forEach(function(u){
       var key='pms_announcements_'+u.id;
@@ -2326,8 +2331,8 @@ function approveUser(userName){
     });
     localStorage.removeItem('pms_pending_announcements');
   }catch(e){}
-  auditLog('config','User Approved','Approved user: '+userName);
-  renderAdminContent();
+  auditLog('config','User Approved','Approved: '+userName);
+  try{renderAdminContent();}catch(e){}
   try{renderHome();}catch(e){}
   populateLoginDropdown();
   toast(userName+' approved as rigger','success');
@@ -5312,12 +5317,14 @@ function renderPSR(){
   });
   // Also add status counts popped entries as unpacked — iterate ALL keys not just STATUS_SYS
   Object.keys(S.statusCounts||{}).forEach(function(sys){
+    // Map tracker key to display name (T-11R/SP -> T-11R)
+    var displaySys=sys==='T-11R/SP'?'T-11R':sys;
     (S.statusCounts[sys]?.popped||[]).forEach(e=>{
       const cnt=parseInt(e.count)||0;
       if(cnt>0){
-        if(!unpackedBySystem[sys]) unpackedBySystem[sys]={total:0,bins:[]};
-        unpackedBySystem[sys].total+=cnt;
-        unpackedBySystem[sys].bins.push({bin:e.bin||'Tracker',count:cnt});
+        if(!unpackedBySystem[displaySys]) unpackedBySystem[displaySys]={total:0,bins:[]};
+        unpackedBySystem[displaySys].total+=cnt;
+        unpackedBySystem[displaySys].bins.push({bin:e.bin||'Tracker',count:cnt});
       }
     });
   });
@@ -6566,8 +6573,13 @@ function renderWeekly(){
       let packedThisWeek=0;
       S.sections.forEach(sec=>{
         if(sec.systemType!==sys) return;
+        // Count bulk sections packed this week
+        if(sec.bulkPackDate && sec.bulkPackDate>=startStr && sec.bulkPackDate<=endStr){
+          packedThisWeek+=Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
+        }
+        // Count serial number rows packed this week
         sec.rows.forEach(r=>{
-          if(r.packDate && r.packDate>=startStr && r.packDate<=endStr) packedThisWeek++;
+          if(r.packDate && r.packDate>=startStr && r.packDate<=endStr && r.serialNumber && r.packer) packedThisWeek++;
         });
       });
       weekData[sys]={packedThisWeek};
