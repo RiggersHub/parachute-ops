@@ -2787,8 +2787,12 @@ document.getElementById('unifiedBar')?.addEventListener('change',function(e){
   // Ensure the entry exists at this index
   while(S.statusCounts[sys][cat].length<=idx) S.statusCounts[sys][cat].push({bin:'',count:''});
   S.statusCounts[sys][cat][idx][inp.dataset.fld]=inp.dataset.fld==='count'?(parseInt(inp.value)||''):inp.value;
-  // Save immediately — statusCounts changes must reach DB before next auto-pull overwrites them
   save();
+  // Re-render PSR if user is on PSR tab so On Hand numbers update immediately
+  try{
+    var activePage=document.querySelector('.nav-tab.active');
+    if(activePage&&activePage.dataset.page==='psr') renderPSR();
+  }catch(e){}
   if(dbReady&&activeUnitId){
     clearTimeout(_saveDebounce);
     _saveDebounce=setTimeout(function(){
