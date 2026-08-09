@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.80.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.90.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -646,7 +646,7 @@ const CFG = {
   'RA-1':{ maxBin:30, expDays:180 }, 'RA-1R':{ maxBin:30, expDays:180 },
   'RA-1 DBSL':{ maxBin:30, expDays:180 },
 };
-const STATUS_SYS = ['T-11','T-11R/SP','MC-6','RA-1','RA-1R','RA-1 DBSL'];
+const STATUS_SYS = ['T-11','T-11R','T-11R SP','MC-6','RA-1','RA-1R','RA-1 DBSL'];
 
 const DEFAULT_SYSTEMS=['T-11','T-11R','T-11R SP','MC-6','RA-1','RA-1R','RA-1 DBSL'];
 function getUnitSystems(){
@@ -5229,14 +5229,15 @@ function renderPSR(){
     if(sec.systemType==='RA-1 DBSL') actualRA1DBSL+=countRealRows(sec)+(parseInt(sec.bulkCount)||0);
   });
   // Add popped + maintenance per system to actuals
-  // T-11: uses 'T-11' key
   ['T-11'].forEach(sys=>{
     (S.statusCounts[sys]?.popped||[]).forEach(e=>actualT11+=(parseInt(e.count)||0));
     (S.statusCounts[sys]?.maintenance||[]).forEach(e=>actualT11+=(parseInt(e.count)||0));
   });
-  // T-11R: uses 'T-11R' key (NOT T-11R/SP — that goes to T-11RSP box)
-  // No tracker entries for plain T-11R — they all go under T-11R/SP key
-  // MC-6
+  // T-11R — its own separate tracker key now
+  ['T-11R'].forEach(sys=>{
+    (S.statusCounts[sys]?.popped||[]).forEach(e=>actualT11R+=(parseInt(e.count)||0));
+    (S.statusCounts[sys]?.maintenance||[]).forEach(e=>actualT11R+=(parseInt(e.count)||0));
+  });
   ['MC-6'].forEach(sys=>{
     (S.statusCounts[sys]?.popped||[]).forEach(e=>actualMC6+=(parseInt(e.count)||0));
     (S.statusCounts[sys]?.maintenance||[]).forEach(e=>actualMC6+=(parseInt(e.count)||0));
@@ -5260,9 +5261,12 @@ function renderPSR(){
   let customCapTotal=customCaps.reduce(function(a,cc){return a+(parseInt(cc.cap)||0);},0);
   let customActTotal=0;
   customCaps.forEach(function(cc){S.sections.forEach(function(s){if(s.systemType===cc.sys) customActTotal+=countRealRows(s)+(parseInt(s.bulkCount)||0);});});
-  // T-11R SP actual — sections + popped/maintenance from tracker
+  // T-11R SP actual — sections + own tracker key
   let actualT11RSP=0;
   S.sections.forEach(function(s){if(s.systemType==='T-11R SP') actualT11RSP+=countRealRows(s)+(parseInt(s.bulkCount)||0);});
+  (S.statusCounts['T-11R SP']?.popped||[]).forEach(e=>actualT11RSP+=(parseInt(e.count)||0));
+  (S.statusCounts['T-11R SP']?.maintenance||[]).forEach(e=>actualT11RSP+=(parseInt(e.count)||0));
+  // Also include legacy T-11R/SP key if it exists (backward compat)
   (S.statusCounts['T-11R/SP']?.popped||[]).forEach(e=>actualT11RSP+=(parseInt(e.count)||0));
   (S.statusCounts['T-11R/SP']?.maintenance||[]).forEach(e=>actualT11RSP+=(parseInt(e.count)||0));
   const totalCap=capT11+capT11R+capT11RSP+capMC6+capRA1+capRA1R+capRA1DBSL+customCapTotal;
@@ -5681,12 +5685,18 @@ function syncCapacityToActual(){
     var tot=pop+maint;
     if(tot===0) return;
     if(sys==='T-11') t11+=tot;
-    else if(sys==='T-11R/SP') t11rsp+=tot; // T-11R/SP tracker -> T-11R SP box only
+    else if(sys==='T-11R') t11r+=tot;
+    else if(sys==='T-11R SP') t11rsp+=tot;
     else if(sys==='MC-6') mc6+=tot;
     else if(sys==='RA-1') ra1+=tot;
     else if(sys==='RA-1R') ra1r+=tot;
     else if(sys==='RA-1 DBSL') ra1dbsl+=tot;
   });
+  // Also include legacy T-11R/SP key
+  var legPop=0,legMaint=0;
+  (S.statusCounts['T-11R/SP']?.popped||[]).forEach(function(e){legPop+=(parseInt(e.count)||0);});
+  (S.statusCounts['T-11R/SP']?.maintenance||[]).forEach(function(e){legMaint+=(parseInt(e.count)||0);});
+  t11rsp+=legPop+legMaint;
   S.capacityT11=t11;
   S.capacityT11R=t11r;
   S.capacityT11RSP=t11rsp;
