@@ -1947,22 +1947,27 @@ function doCreateAccount(){
     if(sbClient){
       dbCall(async function(){
         var dbRow={name:username, last_name:lastName, role:'pending', pin:pin, email:''};
-        // Use upsert - handles both insert and update, won't fail on duplicates
-        var {error}=await sbClient.from('pms_users').upsert(dbRow,{onConflict:'name'});
-        if(error) throw error;
-        dbLog('New pending account saved to DB: '+username);
-      }).catch(function(e){
-        dbLog('Account DB save error: '+(e&&e.message||e));
-        // If upsert failed, try plain insert as fallback
-        if(retriesLeft>0){
-          setTimeout(function(){ pushUserToDB(retriesLeft-1); }, 2000);
+        dbLog('Attempting upsert for: '+username);
+        var res=await sbClient.from('pms_users').upsert(dbRow,{onConflict:'name'});
+        if(res&&res.error){
+          dbLog('Upsert error: '+JSON.stringify(res.error));
+          throw res.error;
         }
+        dbLog('New pending account saved to DB: '+username);
+      }).then(function(result){
+        if(result===null){
+          dbLog('dbCall returned null for upsert - error was caught');
+          if(retriesLeft>0) setTimeout(function(){ pushUserToDB(retriesLeft-1); }, 2000);
+        }
+      }).catch(function(e){
+        dbLog('pushUserToDB error: '+(e&&e.message||String(e)));
+        if(retriesLeft>0) setTimeout(function(){ pushUserToDB(retriesLeft-1); }, 2000);
       });
     } else if(retriesLeft>0){
       setTimeout(function(){ pushUserToDB(retriesLeft-1); }, 1000);
-      dbLog('Waiting for DB connection ('+retriesLeft+' retries left)');
+      dbLog('Waiting for sbClient ('+retriesLeft+' retries left)');
     } else {
-      dbLog('ERROR: Could not save new account to DB');
+      dbLog('ERROR: sbClient never became available');
     }
   }
   pushUserToDB(10);
