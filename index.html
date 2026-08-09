@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v3.90.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v4.00.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -1223,6 +1223,7 @@ async function getUsersDB() {
       role: u.role,
       pin: u.pin,
       email: u.email || '',
+      created_at: u.created_at || '',
       _dbId: u.id
     }));
   }
@@ -1247,7 +1248,8 @@ async function saveUsersDB(users) {
         last_name: u.lastName || u.name,
         role: u.role,
         pin: u.pin,
-        email: u.email || ''
+        email: u.email || '',
+        created_at: u.created_at || new Date().toISOString()
       };
       if (existingMap[u.name]) {
         await sbClient.from('pms_users').update(dbRow).eq('id', existingMap[u.name]);
@@ -1945,23 +1947,25 @@ function doCreateAccount(){
     if(sbClient){
       dbCall(async function(){
         var dbRow={name:username, last_name:lastName, role:'pending', pin:pin, email:''};
-        var existing=await sbClient.from('pms_users').select('id').eq('name',username);
-        if(existing&&existing.data&&existing.data.length>0){
-          await sbClient.from('pms_users').update(dbRow).eq('name',username);
-        } else {
-          await sbClient.from('pms_users').insert(dbRow);
-        }
+        // Use upsert - handles both insert and update, won't fail on duplicates
+        var {error}=await sbClient.from('pms_users').upsert(dbRow,{onConflict:'name'});
+        if(error) throw error;
         dbLog('New pending account saved to DB: '+username);
-      }).catch(function(e){dbLog('Account DB save error: '+(e&&e.message||e));});
+      }).catch(function(e){
+        dbLog('Account DB save error: '+(e&&e.message||e));
+        // If upsert failed, try plain insert as fallback
+        if(retriesLeft>0){
+          setTimeout(function(){ pushUserToDB(retriesLeft-1); }, 2000);
+        }
+      });
     } else if(retriesLeft>0){
-      // sbClient not ready yet — wait 1 second and retry
       setTimeout(function(){ pushUserToDB(retriesLeft-1); }, 1000);
-      dbLog('Waiting for DB connection to save new account ('+retriesLeft+' retries left)');
+      dbLog('Waiting for DB connection ('+retriesLeft+' retries left)');
     } else {
-      dbLog('ERROR: Could not save new account to DB — sbClient never became available');
+      dbLog('ERROR: Could not save new account to DB');
     }
   }
-  pushUserToDB(10); // retry up to 10 times (10 seconds)
+  pushUserToDB(10);
 
   // Write announcement to global key + all unit keys so everyone sees it
   var announceText='🔔 New account request: '+lastName+' is pending approval.';
