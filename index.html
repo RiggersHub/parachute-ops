@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v4.00.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v4.10.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -1224,6 +1224,7 @@ async function getUsersDB() {
       pin: u.pin,
       email: u.email || '',
       created_at: u.created_at || '',
+      unitAccess: typeof u.unit_access==='string' ? JSON.parse(u.unit_access||'[]') : (u.unit_access||[]),
       _dbId: u.id
     }));
   }
@@ -2335,9 +2336,12 @@ function approveUser(userName){
 function _doApproveUser(user, users, userName){
   user.role='rigger';
   saveUsers(users);
-  // Update only this user in DB
+  // Upsert to DB — works whether user exists or not
   if(sbClient) dbCall(async function(){
-    await sbClient.from('pms_users').update({role:'rigger'}).eq('name',userName);
+    var dbRow={name:user.name, last_name:user.lastName||user.name, role:'rigger', pin:user.pin, email:user.email||''};
+    var res=await sbClient.from('pms_users').upsert(dbRow,{onConflict:'name'});
+    if(res&&res.error) dbLog('approveUser upsert error: '+JSON.stringify(res.error));
+    else dbLog('User approved in DB: '+userName);
   }).catch(function(e){dbLog('approveUser DB error: '+(e&&e.message||e));});
   // Remove pending announcements
   try{
@@ -2375,7 +2379,20 @@ function toggleUnitAccess(userName, unitId, granted){
     user.unitAccess=user.unitAccess.filter(function(id){return id!==unitId;});
   }
   saveUsers(users);
-  if(sbClient) saveUsersDB();
+  // Upsert this user to DB including unitAccess
+  if(sbClient) dbCall(async function(){
+    var dbRow={
+      name:user.name,
+      last_name:user.lastName||user.name,
+      role:user.role,
+      pin:user.pin,
+      email:user.email||'',
+      unit_access:JSON.stringify(user.unitAccess||[])
+    };
+    var res=await sbClient.from('pms_users').upsert(dbRow,{onConflict:'name'});
+    if(res&&res.error) dbLog('toggleUnitAccess error: '+JSON.stringify(res.error));
+    else dbLog('Unit access saved for '+userName);
+  }).catch(function(e){dbLog('toggleUnitAccess DB error: '+(e&&e.message||e));});
   auditLog('config','Unit Access','Set '+userName+' access to '+unitId+': '+(granted?'granted':'revoked'));
   toast(userName+' access '+(granted?'granted':'revoked'),'success',2000);
 }
@@ -5028,7 +5045,7 @@ function renderHome(){
           <div style="font-size:12px;font-weight:600;color:${isPending?'var(--warning)':'var(--accent)'};">${esc(a.title||a.text||'Announcement')}</div>
           <div style="display:flex;gap:6px;align-items:center;">
             <span style="font-size:10px;color:var(--text-muted);">${a.date||a.ts?new Date(a.ts||a.date).toLocaleDateString():''}</span>
-            ${!isPending?`<button class="row-action-btn delete" onclick="deleteAnnouncement(${i})" title="Delete">🗑</button>`:''}
+            ${(currentUser&&(currentUser.role==='admin'||currentUser.role==='masteradmin'))?`<button class="row-action-btn delete" onclick="deleteAnnouncement(${i})" title="Delete">🗑</button>`:''}
           </div>
         </div>
         <div style="font-size:12px;color:var(--text-secondary);white-space:pre-wrap;">${esc(a.body||a.text||'')}</div>
