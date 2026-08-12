@@ -2503,83 +2503,179 @@ function renderAdminContent(){
 // ══════════════════════════════════════════════
 const MFF_ITEMS = ['Altimeter','Cypress','Oxygen'];
 
-function openMFFDetail(itemKey){
-  if(!S.mffData) S.mffData={};
-  var d=S.mffData[itemKey]||{};
-  var label=itemKey.charAt(0).toUpperCase()+itemKey.slice(1);
-  var is='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:7px 10px;font-size:12px;font-family:inherit;outline:none;width:100%;box-sizing:border-box;';
+// ── MFF Status Calculator ──
+function getMFFItemStatus(item, maintDate){
+  // maintDate = 'YYYY-MM' string (month/year)
+  if(!maintDate) return 'unknown';
+  var now=new Date(); now.setHours(0,0,0,0);
+  var parts=maintDate.split('-');
+  var dueYear=parseInt(parts[0]),dueMonth=parseInt(parts[1])-1;
+  var dueDate=new Date(dueYear,dueMonth,1); // 1st of due month
 
-  var today=new Date().toISOString().split('T')[0];
-  var expClass='';
-  if(d.expiration){
-    var diff=(new Date(d.expiration+' 00:00:00')-new Date())/(1000*60*60*24);
-    expClass=diff<0?'color:var(--danger);font-weight:700;':diff<=30?'color:var(--warning);font-weight:700;':'color:var(--success);';
+  var msPerDay=86400000;
+  var diffDays=Math.floor((dueDate-now)/msPerDay);
+
+  if(item==='Cypress'){
+    // Warning: within 2 months before due
+    // Due: past due, within 6 months
+    // Expired: 6+ months past due
+    var expiredDate=new Date(dueYear,dueMonth+6,1);
+    if(now>=expiredDate) return 'expired';
+    if(now>=dueDate) return 'due';
+    if(diffDays<=60) return 'warning';
+    return 'good';
+  } else {
+    // Oxygen / Altimeter — 30 day warning, then expired
+    if(diffDays<0) return 'expired';
+    if(diffDays<=30) return 'warning';
+    return 'good';
+  }
+}
+
+function getMFFStatusLabel(status){
+  if(status==='good') return {label:'Good',color:'var(--success)',icon:'✅'};
+  if(status==='warning') return {label:'Due Soon',color:'var(--warning)',icon:'🟡'};
+  if(status==='due') return {label:'Maint Due',color:'var(--danger)',icon:'🔴'};
+  if(status==='expired') return {label:'Expired',color:'var(--danger)',icon:'⛔'};
+  return {label:'—',color:'var(--text-muted)',icon:''};
+}
+
+// ── MFF Popup — individual item list ──
+function openMFFList(itemKey){
+  if(!S.mffData) S.mffData={};
+  if(!S.mffData[itemKey]) S.mffData[itemKey]={items:[]};
+  if(!S.mffData[itemKey].items) S.mffData[itemKey].items=[];
+
+  var label=itemKey==='oxygen'?'Oxygen Tanks':itemKey==='altimeter'?'Altimeter':itemKey==='cypress'?'Cypress':'MFF';
+  var hasPack=itemKey==='cypress';
+  var overlay=document.createElement('div');
+  overlay.id='mffListOverlay';
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10005;display:flex;align-items:center;justify-content:center;padding:16px;';
+
+  function buildContent(){
+    var items=S.mffData[itemKey].items||[];
+    var is='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:6px 8px;font-size:12px;font-family:inherit;outline:none;width:100%;box-sizing:border-box;';
+    var good=0,warning=0,due=0,expired=0;
+    items.forEach(function(it){
+      var st=getMFFItemStatus(itemKey,it.maintDate);
+      if(st==='good') good++;
+      else if(st==='warning') warning++;
+      else if(st==='due') due++;
+      else if(st==='expired') expired++;
+    });
+
+    var html=`<div style="background:var(--bg-card);border-radius:12px;width:100%;max-width:640px;max-height:88vh;display:flex;flex-direction:column;">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 18px;border-bottom:1px solid var(--border);flex-shrink:0;">
+        <div style="font-size:16px;font-weight:700;">${label}</div>
+        <button onclick="document.getElementById('mffListOverlay').remove()" style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:20px;">✕</button>
+      </div>
+      <div style="display:flex;gap:12px;padding:10px 18px;border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap;">
+        <span style="font-size:12px;">Total: <strong>${items.length}</strong></span>
+        <span style="font-size:12px;color:var(--success);">✅ Good: <strong>${good}</strong></span>
+        ${warning>0?`<span style="font-size:12px;color:var(--warning);">🟡 Due Soon: <strong>${warning}</strong></span>`:''}
+        ${due>0?`<span style="font-size:12px;color:var(--danger);">🔴 Maint Due: <strong>${due}</strong></span>`:''}
+        ${expired>0?`<span style="font-size:12px;color:var(--danger);">⛔ Expired: <strong>${expired}</strong></span>`:''}
+      </div>
+      <div style="overflow-y:auto;flex:1;padding:14px 18px;">`;
+
+    if(items.length===0){
+      html+=`<div style="color:var(--text-muted);font-size:13px;text-align:center;padding:20px;">No ${label} added yet. Click + Add below.</div>`;
+    } else {
+      items.forEach(function(it,idx){
+        var st=getMFFItemStatus(itemKey,it.maintDate);
+        var stInfo=getMFFStatusLabel(st);
+        html+=`<div style="display:grid;grid-template-columns:${hasPack?'1fr 1fr 1fr auto auto':'1fr 1fr auto auto'};gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);">`;
+        if(hasPack) html+=`<input type="text" value="${esc(it.rig||'')}" placeholder="Packtray/Rig" onchange="S.mffData['${itemKey}'].items[${idx}].rig=this.value;save();" style="${is}">`;
+        html+=`<input type="text" value="${esc(it.serial||'')}" placeholder="Serial #" onchange="S.mffData['${itemKey}'].items[${idx}].serial=this.value;save();" style="${is}">`;
+        html+=`<input type="month" value="${it.maintDate||''}" onchange="S.mffData['${itemKey}'].items[${idx}].maintDate=this.value;save();refreshMFFList('${itemKey}');" style="${is}color-scheme:dark;">`;
+        html+=`<span style="font-size:11px;font-weight:600;color:${stInfo.color};white-space:nowrap;">${stInfo.icon} ${stInfo.label}</span>`;
+        html+=`<button onclick="S.mffData['${itemKey}'].items.splice(${idx},1);save();refreshMFFList('${itemKey}');" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px;line-height:1;">✕</button>`;
+        html+=`</div>`;
+      });
+    }
+
+    html+=`</div>
+      <div style="padding:12px 18px;border-top:1px solid var(--border);display:flex;gap:10px;justify-content:space-between;flex-shrink:0;">
+        <button onclick="addMFFItem('${itemKey}')" style="background:var(--accent);border:none;color:#fff;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit;">+ Add ${label==='Oxygen Tanks'?'Tank':label==='Altimeter'?'Altimeter':'Cypress'}</button>
+        <button onclick="saveMFFAndClose('${itemKey}')" style="background:var(--success);border:none;color:#fff;padding:8px 18px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;font-family:inherit;">Save &amp; Close</button>
+      </div>
+    </div>`;
+    return html;
   }
 
-  var html='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:4px;">';
-  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px;">Date Calibrated</label>'
-    +'<input id="mff_calibrated" type="date" value="'+(d.calibrated||'')+'" style="'+is+'"></div>';
-  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px;">Expiration Date</label>'
-    +'<input id="mff_expiration" type="date" value="'+(d.expiration||'')+'" style="'+is+(d.expiration?expClass:'')+'"></div>';
-  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px;">In Service</label>'
-    +'<input id="mff_inservice" type="number" min="0" value="'+(d.inService||'')+'" placeholder="0" style="'+is+'"></div>';
-  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px;">In Maintenance</label>'
-    +'<input id="mff_maintenance" type="number" min="0" value="'+(d.maintenance||'')+'" placeholder="0" style="'+is+'"></div>';
-  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px;">Last Updated</label>'
-    +'<input id="mff_lastUpdated" type="date" value="'+(d.lastUpdated||today)+'" style="'+is+'"></div>';
-  html+='<div><label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:3px;">Notes</label>'
-    +'<input id="mff_notes" type="text" value="'+esc(d.notes||'')+'" placeholder="Optional notes" style="'+is+'"></div>';
-  html+='</div>';
+  overlay.innerHTML=buildContent();
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click',function(e){if(e.target===overlay) saveMFFAndClose(itemKey);});
+}
 
-  showConfirm(label+' — MFF Equipment',html,[
-    {label:'Cancel',cls:'btn-secondary',fn:function(){}},
-    {label:'Save',cls:'btn-primary',fn:function(){
-      S.mffData[itemKey]={
-        calibrated:document.getElementById('mff_calibrated').value,
-        expiration:document.getElementById('mff_expiration').value,
-        inService:parseInt(document.getElementById('mff_inservice').value)||0,
-        maintenance:parseInt(document.getElementById('mff_maintenance').value)||0,
-        lastUpdated:document.getElementById('mff_lastUpdated').value,
-        notes:document.getElementById('mff_notes').value.trim()
-      };
-      save(); renderUnifiedBar();
-      toast(label+' updated','success',2000);
-    }}
-  ]);
+function refreshMFFList(itemKey){
+  var overlay=document.getElementById('mffListOverlay');
+  if(!overlay) return;
+  // Rebuild content in place
+  openMFFList(itemKey);
+  document.getElementById('mffListOverlay')?.remove(); // remove old
+  // The new one was just added by openMFFList
+}
+
+function addMFFItem(itemKey){
+  if(!S.mffData) S.mffData={};
+  if(!S.mffData[itemKey]) S.mffData[itemKey]={items:[]};
+  if(!S.mffData[itemKey].items) S.mffData[itemKey].items=[];
+  S.mffData[itemKey].items.push({rig:'',serial:'',maintDate:''});
+  save();
+  // Rebuild overlay
+  var old=document.getElementById('mffListOverlay');
+  if(old) old.remove();
+  openMFFList(itemKey);
+}
+
+function saveMFFAndClose(itemKey){
+  save();
+  renderUnifiedBar();
+  var overlay=document.getElementById('mffListOverlay');
+  if(overlay) overlay.remove();
+  toast('Saved','success',1500);
 }
 
 function renderMFFColumn(){
   if(!S.mffData) S.mffData={};
   var html='<div class="tracker-col"><div class="tracker-col-title">MFF</div><div class="tracker-cards">';
-  MFF_ITEMS.forEach(function(item){
-    var key=item.toLowerCase();
-    var d=S.mffData[key]||{};
-    var inSvc=d.inService||0;
-    var maint=d.maintenance||0;
-    var expLabel='—';
-    var expStyle='color:var(--text-muted);';
-    if(d.expiration){
-      var diff=(new Date(d.expiration+' 00:00:00')-new Date())/(1000*60*60*24);
-      expLabel=d.expiration;
-      expStyle=diff<0?'color:var(--danger);font-weight:700;':diff<=30?'color:var(--warning);font-weight:700;':diff<=90?'color:var(--success);font-weight:600;':'color:var(--text-muted);';
-    }
-    html+='<div style="background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:8px 10px;margin-bottom:6px;">';
-    html+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">';
-    html+='<span style="font-size:12px;font-weight:700;color:var(--text-primary);">'+item+'</span>';
-    html+='<button onclick="openMFFDetail(\''+key+'\')" style="background:var(--accent-dim);border:none;border-radius:4px;color:var(--accent);cursor:pointer;font-size:10px;padding:2px 8px;font-family:inherit;">Edit</button>';
-    html+='</div>';
-    html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:10px;">';
-    html+='<div><span style="color:var(--text-muted);">In Svc: </span><strong style="color:var(--success);">'+inSvc+'</strong></div>';
-    html+='<div><span style="color:var(--text-muted);">Maint: </span><strong style="color:var(--warning);">'+maint+'</strong></div>';
-    html+='<div style="grid-column:span 2;"><span style="color:var(--text-muted);">Cal: </span><span>'+(d.calibrated||'—')+'</span></div>';
-    html+='<div style="grid-column:span 2;"><span style="color:var(--text-muted);">Exp: </span><span style="'+expStyle+'">'+expLabel+'</span></div>';
-    html+='</div>';
-    html+='</div>';
+
+  var mffDisplay=[
+    {key:'cypress', label:'Cypress'},
+    {key:'oxygen',  label:'Oxygen Tanks'},
+    {key:'altimeter',label:'Altimeter'}
+  ];
+
+  mffDisplay.forEach(function(m){
+    var items=(S.mffData[m.key]&&S.mffData[m.key].items)||[];
+    var good=0,warning=0,due=0,expired=0;
+    items.forEach(function(it){
+      var st=getMFFItemStatus(m.key,it.maintDate);
+      if(st==='good') good++;
+      else if(st==='warning') warning++;
+      else if(st==='due') due++;
+      else if(st==='expired') expired++;
+    });
+    var hasIssue=warning+due+expired>0;
+
+    html+=`<div style="background:var(--bg-input);border:1px solid ${hasIssue?'var(--danger)':'var(--border)'};border-radius:6px;padding:8px 10px;margin-bottom:6px;">`;
+    html+=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">`;
+    html+=`<button onclick="openMFFList('${m.key}')" style="background:none;border:none;color:var(--accent);cursor:pointer;font-size:13px;font-weight:700;font-family:inherit;padding:0;text-decoration:underline;">${m.label}</button>`;
+    html+=`<span style="font-size:10px;color:var(--text-muted);">${items.length} total</span>`;
+    html+=`</div>`;
+    html+=`<div style="display:flex;gap:8px;flex-wrap:wrap;font-size:10px;">`;
+    html+=`<span style="color:var(--success);">✅ ${good}</span>`;
+    if(warning>0) html+=`<span style="color:var(--warning);">🟡 ${warning}</span>`;
+    if(due>0) html+=`<span style="color:var(--danger);">🔴 ${due}</span>`;
+    if(expired>0) html+=`<span style="color:var(--danger);">⛔ ${expired}</span>`;
+    if(items.length===0) html+=`<span style="color:var(--text-muted);">Click name to add</span>`;
+    html+=`</div></div>`;
   });
+
   html+='</div></div>';
   return html;
 }
-
 function renderUnifiedBar(){
   var bar=document.getElementById('unifiedBar');
   if(!bar) return;
