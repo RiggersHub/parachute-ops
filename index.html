@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v4.30.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v4.40.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -2034,7 +2034,14 @@ function checkSession(){
   var sess=sessionStorage.getItem('pms_session');
   if(sess){
     try{
-      currentUser=JSON.parse(sess); if(!currentUser.lastName){var su=getUsers().find(function(u){return u.name===currentUser.name;}); if(su) currentUser.lastName=su.lastName||su.name;}
+      currentUser=JSON.parse(sess);
+      // Ghost protocol — skip user list validation entirely
+      if(currentUser._ghost){
+        document.getElementById('loginOverlay').style.display='none';
+        updateUserDisplay();
+        return true;
+      }
+      if(!currentUser.lastName){var su=getUsers().find(function(u){return u.name===currentUser.name;}); if(su) currentUser.lastName=su.lastName||su.name;}
       document.getElementById('loginOverlay').style.display='none';
       updateUserDisplay();
       return true;
@@ -2048,6 +2055,13 @@ function checkSession(){
 function updateUserDisplay(){
   var el=document.getElementById('currentUserDisplay');
   if(el&&currentUser){
+    // Ghost protocol — skip all user list checks
+    if(currentUser._ghost){
+      if(el) el.textContent=currentUser.name||'TLSR';
+      var badge=document.getElementById('userBadge');
+      if(badge){badge.textContent=currentUser.name||'TLSR';badge.style.background='#6b21a8';}
+      return;
+    }
     // Check if role was changed by admin
     var users=getUsers();
     var me=users.find(function(u){return u.name===currentUser.name;});
