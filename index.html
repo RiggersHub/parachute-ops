@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v4.40.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v4.50.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -2808,14 +2808,19 @@ function renderStatusBar(){renderUnifiedBar();}
 function addStatusEntry(sys,cat){
   if(!S.statusCounts[sys]) S.statusCounts[sys]={};
   if(!S.statusCounts[sys][cat]) S.statusCounts[sys][cat]=[];
-  // Add to TOP so newest entry is first
   S.statusCounts[sys][cat].unshift({bin:'',count:''});
+  auditLog('section','Tracker Add','Added '+cat+' entry for '+sys);
   save();
-  // Re-render so indices match the new array order
   renderStatusBar();
 }
 function delStatusEntry(sys,cat,idx){
-  if(S.statusCounts[sys]?.[cat]?.length>1){ S.statusCounts[sys][cat].splice(idx,1); save(); renderStatusBar(); }
+  if(S.statusCounts[sys]?.[cat]?.length>1){
+    var entry=S.statusCounts[sys][cat][idx];
+    var detail=sys+' '+cat+' bin '+(entry.bin||'?')+' ('+( entry.count||0)+' chutes)';
+    S.statusCounts[sys][cat].splice(idx,1);
+    auditLog('section','Tracker Delete','Deleted '+detail);
+    save(); renderStatusBar();
+  }
 }
 
 function updEquipEntry(eq,idx,fld,val){
@@ -2923,7 +2928,13 @@ document.getElementById('unifiedBar')?.addEventListener('change',function(e){
   if(!S.statusCounts[sys][cat]) S.statusCounts[sys][cat]=[];
   // Ensure the entry exists at this index
   while(S.statusCounts[sys][cat].length<=idx) S.statusCounts[sys][cat].push({bin:'',count:''});
+  var oldVal=S.statusCounts[sys][cat][idx][inp.dataset.fld];
   S.statusCounts[sys][cat][idx][inp.dataset.fld]=inp.dataset.fld==='count'?(parseInt(inp.value)||''):inp.value;
+  // Audit log count changes with before/after
+  if(inp.dataset.fld==='count'&&oldVal!==S.statusCounts[sys][cat][idx].count){
+    var binName=S.statusCounts[sys][cat][idx].bin||'(unnamed)';
+    auditLog('section','Tracker Update',sys+' '+cat+' bin '+binName+': '+( oldVal||0)+' → '+( S.statusCounts[sys][cat][idx].count||0));
+  }
   save();
   // Re-render PSR if user is on PSR tab so On Hand numbers update immediately
   try{
@@ -7884,7 +7895,10 @@ function renderOpsBulk(el){
     html+='</div>';
   });
   
-  html+='<div style="margin-top:16px;text-align:center;"><button class="btn btn-primary" onclick="executeBulkIssue()">Sign Out Bulk Chutes</button></div>';
+  html+='<div style="margin-top:16px;display:flex;gap:10px;justify-content:center;">';
+  html+='<button class="btn btn-secondary" onclick="printBulkLoadPlan()">🖨 Print Load Plan</button>';
+  html+='<button class="btn btn-primary" onclick="executeBulkIssue()">Sign Out Bulk Chutes</button>';
+  html+='</div>';
   html+='</div>';
 
   // Popped chutes sign-out section
@@ -7950,6 +7964,46 @@ function renderOpsBulk(el){
   }
 
   el.innerHTML=html;
+}
+
+function printBulkLoadPlan(){
+  var unit=(document.getElementById('bulkIssueUnit')||{}).value||'(Unit not entered)';
+  var date=(document.getElementById('bulkIssueDate')||{}).value||new Date().toISOString().split('T')[0];
+  var unitInfo=getUnitInfo();
+  var printed=new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'});
+
+  // Gather selected quantities
+  var lines=[];
+  var grandTotal=0;
+  S.sections.forEach(function(sec){
+    var inp=document.getElementById('bulkIssueQty-'+sec.id);
+    if(!inp) return;
+    var qty=parseInt(inp.value)||0;
+    if(qty<=0) return;
+    lines.push({bin:sec.binLocation,sys:sec.systemType,qty:qty,packDate:sec.bulkPackDate||'',expDate:sec.bulkExpDate||''});
+    grandTotal+=qty;
+  });
+
+  if(lines.length===0){toast('Enter quantities first','warning');return;}
+
+  var body='<h1>Bulk Issue Loading Plan</h1>';
+  body+='<div class="header-info"><strong>Unit:</strong> '+esc(unitInfo.name||'—')+' &nbsp;|&nbsp; <strong>Issuing To:</strong> '+esc(unit)+' &nbsp;|&nbsp; <strong>Date:</strong> '+date+' &nbsp;|&nbsp; <strong>Printed:</strong> '+printed+'</div>';
+  body+='<div class="section-title">Chute Loading Plan</div>';
+  body+='<table><thead><tr><th>Bin</th><th>System</th><th>Quantity</th><th>Pack Date</th><th>Exp Date</th></tr></thead><tbody>';
+  lines.forEach(function(l){
+    body+='<tr><td><strong>'+esc(l.bin)+'</strong></td><td>'+esc(l.sys)+'</td><td><strong>'+l.qty+'</strong></td><td>'+( l.packDate||'—')+'</td><td>'+( l.expDate||'—')+'</td></tr>';
+  });
+  body+='<tr style="border-top:2px solid #333;"><td><strong>TOTAL</strong></td><td></td><td><strong>'+grandTotal+'</strong></td><td></td><td></td></tr>';
+  body+='</tbody></table>';
+
+  // Signature blocks
+  body+='<div class="sig-line" style="margin-top:30px;">';
+  body+='<div class="sig-block"><div class="sig-label">Issuing Rigger</div><div class="sig-field"></div></div>';
+  body+='<div class="sig-block"><div class="sig-label">Receiving NCO / Signature</div><div class="sig-field"></div></div>';
+  body+='<div class="sig-block"><div class="sig-label">Date</div><div class="sig-field"></div></div>';
+  body+='</div>';
+  body+='<div class="footer">Parachute Management System — Bulk Issue Load Plan — '+printed+'</div>';
+  openPrintPreview('Bulk Issue Loading Plan', body);
 }
 
 function executeBulkIssue(){
@@ -8853,15 +8907,29 @@ function doFinalProcessSignIn(signOutIdx,live,popped,scannedIn,isMulti){
   // Put live chutes back
   var liveSNs=liveChutes.map(function(ch){return ch.sn;});
   liveChutes.forEach(function(chute){
-    if(!chute.rowData) return;
+    if(!chute.rowData){
+      dbLog('WARN: rowData missing for '+chute.sn+' — cannot restore to section');
+      return;
+    }
+    // Try secId first, then bin+system, then any matching system
     var sec=S.sections.find(function(s){return s.id===chute.secId;});
     if(!sec) sec=S.sections.find(function(s){return s.binLocation===chute.bin&&s.systemType===chute.system;});
+    if(!sec) sec=S.sections.find(function(s){return s.systemType===chute.system;});
     if(sec){
       var row=JSON.parse(JSON.stringify(chute.rowData));
-      delete row._signedOut;delete row._signedOutTo;delete row._signedOutDate;delete row._signOutIdx;delete row._popped;
+      delete row._signedOut; delete row._signedOutTo; delete row._signedOutDate;
+      delete row._signOutIdx; delete row._popped; delete row._dbId;
       sec.rows.push(row);
+      dbLog('Restored '+chute.sn+' to '+sec.binLocation);
+    } else {
+      dbLog('ERROR: No matching section for '+chute.sn+' ('+chute.system+') — chute lost on return');
     }
   });
+  
+  // Switch RPR tab to show the returned chutes' system
+  if(liveChutes.length>0&&liveChutes[0].system){
+    localStorage.setItem('pms_rpr_tab',liveChutes[0].system);
+  }
   
   // Add popped to tracker - use per-system counts if available
   if(popped>0){
