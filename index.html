@@ -398,13 +398,16 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v4.50.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v4.60.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
     <div class="login-error" id="loginError"></div>
     <button class="login-btn" onclick="doLogin()">Sign In</button>
-    <div style="margin-top:14px;"><button onclick="showCreateAccount()" style="background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;text-decoration:underline;font-family:inherit;">Create New Account</button></div>
+    <div style="margin-top:14px;display:flex;justify-content:center;gap:20px;">
+      <button onclick="showCreateAccount()" style="background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;text-decoration:underline;font-family:inherit;">Create New Account</button>
+      <button onclick="showForgotPin()" style="background:none;border:none;color:var(--text-muted);font-size:12px;cursor:pointer;text-decoration:underline;font-family:inherit;">Forgot / Reset PIN</button>
+    </div>
     <div style="margin-top:10px;"><button onclick="newParaRequest()" style="background:var(--accent);border:none;color:#fff;font-size:13px;cursor:pointer;font-family:inherit;padding:8px 20px;border-radius:6px;font-weight:600;width:100%;">Request Parachutes</button></div>
   </div>
   <div class="login-box" id="createPanel" style="display:none;">
@@ -412,11 +415,32 @@
     <div class="subtitle">Enter your last name to register</div>
     <input type="text" id="createLast" class="form-input" placeholder="Last Name" style="margin-bottom:12px;" autocomplete="off">
     <input type="password" id="createPin" class="form-input" placeholder="Set PIN (4-10 digits)" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;margin-bottom:4px;">
-    <div style="font-size:10px;color:var(--text-muted);margin-bottom:12px;">No 4+ consecutive same digits (e.g. 1111, 0000)</div>
-    <input type="password" id="createPinConfirm" class="form-input" placeholder="Confirm PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;">
+    <div style="font-size:10px;color:var(--text-muted);margin-bottom:8px;">No 4+ consecutive same digits (e.g. 1111, 0000)</div>
+    <input type="password" id="createPinConfirm" class="form-input" placeholder="Confirm PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;margin-bottom:8px;">
+    <input type="text" id="createPinHint" class="form-input" placeholder="PIN hint (optional — visible to you if forgotten)" maxlength="60" style="margin-bottom:4px;" autocomplete="off">
+    <div style="font-size:10px;color:var(--text-muted);margin-bottom:12px;">Hint is shown when you click Forgot PIN — don't make it too obvious.</div>
     <div class="login-error" id="createError"></div>
     <button class="login-btn" onclick="doCreateAccount()">Create Account</button>
     <div style="margin-top:14px;"><button onclick="showLoginPanel()" style="background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;text-decoration:underline;font-family:inherit;">Back to Sign In</button></div>
+  </div>
+  <div class="login-box" id="forgotPanel" style="display:none;">
+    <h2>Forgot / Reset PIN</h2>
+    <div class="subtitle">Enter your last name to continue</div>
+    <input type="text" id="forgotName" class="form-input" placeholder="Last Name" style="margin-bottom:12px;" autocomplete="off">
+    <div class="login-error" id="forgotError"></div>
+    <div id="forgotHintBox" style="display:none;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:12px;font-size:13px;color:var(--text-primary);">
+      <div style="font-size:10px;color:var(--text-muted);margin-bottom:4px;">YOUR PIN HINT:</div>
+      <div id="forgotHintText" style="font-weight:600;"></div>
+    </div>
+    <div id="forgotResetBox" style="display:none;">
+      <input type="password" id="forgotNewPin" class="form-input" placeholder="New PIN (4-10 digits)" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;margin-bottom:8px;">
+      <input type="password" id="forgotNewPinConfirm" class="form-input" placeholder="Confirm New PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;margin-bottom:12px;">
+    </div>
+    <div style="display:flex;gap:10px;margin-bottom:10px;">
+      <button onclick="doForgotPin()" class="btn btn-secondary" style="flex:1;">Show Hint</button>
+      <button onclick="doResetPin()" class="btn btn-primary" style="flex:1;">Reset PIN</button>
+    </div>
+    <div><button onclick="showLoginPanel()" style="background:none;border:none;color:var(--accent);font-size:12px;cursor:pointer;text-decoration:underline;font-family:inherit;">Back to Sign In</button></div>
   </div>
 </div>
 
@@ -1908,17 +1932,84 @@ async function doLogin(){
   auditLog('config','Login','User logged in: '+(user.lastName||user.name)+' ('+(user.role==='masteradmin'?'admin':user.role)+')');
 }
 
+function showForgotPin(){
+  document.getElementById('loginPanel').style.display='none';
+  document.getElementById('createPanel').style.display='none';
+  document.getElementById('forgotPanel').style.display='';
+  document.getElementById('forgotName').value='';
+  document.getElementById('forgotError').style.display='none';
+  document.getElementById('forgotHintBox').style.display='none';
+  document.getElementById('forgotResetBox').style.display='none';
+}
+
+function doForgotPin(){
+  var name=document.getElementById('forgotName').value.trim();
+  var err=document.getElementById('forgotError');
+  if(!name){err.textContent='Enter your last name';err.style.display='block';return;}
+  var users=getUsers();
+  var user=users.find(function(u){return (u.lastName||u.name).toLowerCase()===name.toLowerCase();});
+  if(!user){err.textContent='Name not found';err.style.display='block';return;}
+  err.style.display='none';
+  var hintBox=document.getElementById('forgotHintBox');
+  var hintText=document.getElementById('forgotHintText');
+  hintBox.style.display='block';
+  hintText.textContent=user.pinHint||'No hint set for this account.';
+}
+
+function doResetPin(){
+  var name=document.getElementById('forgotName').value.trim();
+  var err=document.getElementById('forgotError');
+  var resetBox=document.getElementById('forgotResetBox');
+  if(!name){err.textContent='Enter your last name';err.style.display='block';return;}
+  var users=getUsers();
+  var user=users.find(function(u){return (u.lastName||u.name).toLowerCase()===name.toLowerCase();});
+  if(!user){err.textContent='Name not found';err.style.display='block';return;}
+  err.style.display='none';
+  // Show reset fields if not already visible
+  if(resetBox.style.display==='none'){
+    resetBox.style.display='block';
+    document.getElementById('forgotNewPin').value='';
+    document.getElementById('forgotNewPinConfirm').value='';
+    return;
+  }
+  // Process reset
+  var newPin=document.getElementById('forgotNewPin').value.trim();
+  var newPinConfirm=document.getElementById('forgotNewPinConfirm').value.trim();
+  if(!newPin||newPin.length<4){err.textContent='PIN must be 4-10 digits';err.style.display='block';return;}
+  if(newPin.length>10){err.textContent='PIN cannot exceed 10 digits';err.style.display='block';return;}
+  if(!/^\d+$/.test(newPin)){err.textContent='PIN must be digits only';err.style.display='block';return;}
+  if(hasConsecutiveDupes(newPin)){err.textContent='PIN cannot have 4+ consecutive same digits';err.style.display='block';return;}
+  if(newPin!==newPinConfirm){err.textContent='PINs do not match';err.style.display='block';return;}
+  // Save new PIN
+  user.pin=newPin;
+  saveUsers(users);
+  // Push to DB
+  if(sbClient) dbCall(async function(){
+    await sbClient.from('pms_users').upsert({name:user.name,last_name:user.lastName||user.name,role:user.role,pin:newPin,email:user.email||''},{onConflict:'name'});
+    dbLog('PIN reset for '+user.name);
+  });
+  showLoginPanel();
+  document.getElementById('loginUser').value=user.lastName||user.name;
+  document.getElementById('loginError').textContent='PIN reset successfully. Sign in with your new PIN.';
+  document.getElementById('loginError').style.display='block';
+  document.getElementById('loginError').style.color='var(--success)';
+  setTimeout(function(){document.getElementById('loginError').style.color='';},3000);
+}
+
 function showCreateAccount(){
   document.getElementById('loginPanel').style.display='none';
+  document.getElementById('forgotPanel').style.display='none';
   document.getElementById('createPanel').style.display='';
   document.getElementById('createLast').value='';
-  document.getElementById('createUser').value='';
+  try{document.getElementById('createUser').value='';}catch(e){}
   document.getElementById('createPin').value='';
   document.getElementById('createPinConfirm').value='';
+  try{document.getElementById('createPinHint').value='';}catch(e){}
   document.getElementById('createError').style.display='none';
 }
 function showLoginPanel(){
   document.getElementById('createPanel').style.display='none';
+  document.getElementById('forgotPanel').style.display='none';
   document.getElementById('loginPanel').style.display='';
 }
 
@@ -1949,7 +2040,8 @@ function doCreateAccount(){
     err.textContent='Last name already registered';err.style.display='block';return;
   }
 
-  var newUser={name:username, lastName:lastName, role:'pending', pin:pin};
+  var pinHint=(document.getElementById('createPinHint')||{}).value||'';
+  var newUser={name:username, lastName:lastName, role:'pending', pin:pin, pinHint:pinHint.trim()};
   users.push(newUser);
   saveUsers(users);
 
