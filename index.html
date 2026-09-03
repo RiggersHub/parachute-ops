@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v4.60.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v4.80.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -588,6 +588,7 @@
     <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <button class="btn btn-primary btn-sm" onclick="showAddInventory()">+ Add Serial</button>
       <button class="btn btn-secondary btn-sm" onclick="generateBarcodes()">Print All Barcodes</button>
+      <button class="btn btn-secondary btn-sm" onclick="printNameBarcodes()">🪪 Name Barcodes</button>
       <button class="btn btn-secondary btn-sm" onclick="generateBarcodeSheet('selected')">Print Selected</button>
       <select id="bulkSysType" class="form-input" style="font-size:11px;padding:4px 8px;width:auto;">
         <option value="">Bulk Set System</option>
@@ -3370,6 +3371,7 @@ function sectionHTML(sec){
         <div class="save-bar"><button class="btn btn-success btn-sm" onclick="doSave(${sec.id})">💾 Save</button></div>
         <div style="display:flex;gap:8px;">
           <button class="btn btn-secondary btn-sm" onclick="bulkFill(${sec.id})">📋 Bulk Fill Selected</button>
+          <button class="btn btn-secondary btn-sm" onclick="setAllNames(${sec.id})">👥 Set All Names</button>
           <button class="btn btn-secondary btn-sm" onclick="printPackLog(${sec.id})">🖨 Pack Log</button>
           <button class="btn btn-secondary btn-sm" onclick="printFISheet(${sec.id})">🖨 FI Sheet</button>
 
@@ -3417,7 +3419,7 @@ function rowHTML(sec,r,i){
     <td><input type="text" list="ip-list" value="${esc(r.ip)}" placeholder="IP" onchange="onIP(${sec.id},${i},this.value,this)" class="tab-field" ${dis}></td>
     <td><input type="date" value="${r.packDate||''}" onchange="upd(${sec.id},${i},'packDate',this.value)" style="width:115px;" class="tab-field" ${dis}></td>
     <td><div class="row-actions">
-      <button class="row-action-btn" onclick="openDataBlockScan(${sec.id},${i})" title="Scan data block photo">📷</button>
+      <button class="row-action-btn" onclick="quickScanEntry(${sec.id})" title="Scan serial number">📷</button>
       <button class="row-action-btn" onclick="toggleLock(${sec.id},${i})" title="${locked?'Unlock to edit':'Lock row'}">${locked?'🔒':'✏️'}</button>
       <button class="row-action-btn delete" onclick="delRow(${sec.id},${i})" title="Delete">🗑</button>
     </div></td>
@@ -3710,6 +3712,43 @@ function getEarliestExp(sec){
 }
 
 // ── Bulk Fill ──
+function setAllNames(secId){
+  const s=S.sections.find(x=>x.id===secId); if(!s)return;
+  if(s.rows.length===0){toast('No rows in this section','warning');return;}
+  // Build user name options
+  var userNames=getUsers().filter(function(u){return u.role!=='pending';}).map(function(u){return u.lastName||u.name;});
+  var opts=userNames.map(function(n){return '<option value="'+esc(n)+'">'+esc(n)+'</option>';}).join('');
+  showConfirm('Set Names — All '+s.rows.length+' Rows',
+    `<div style="text-align:left;">
+      <div class="form-group"><label class="form-label">Packer (blank = skip)</label>
+        <select id="bAllPkr" class="form-input">
+          <option value="">— skip —</option>${opts}
+        </select>
+        <input type="text" id="bAllPkrCustom" class="form-input" placeholder="Or type custom name..." style="margin-top:4px;" list="packer-list">
+      </div>
+      <div class="form-group"><label class="form-label">IP (blank = skip)</label>
+        <select id="bAllIP" class="form-input">
+          <option value="">— skip —</option>${opts}
+        </select>
+        <input type="text" id="bAllIPCustom" class="form-input" placeholder="Or type custom name..." style="margin-top:4px;" list="ip-list">
+      </div>
+    </div>`,
+    [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
+     {label:'Apply to All',cls:'btn-primary',fn:function(){
+       var pk=document.getElementById('bAllPkrCustom')?.value||document.getElementById('bAllPkr')?.value||'';
+       var ip=document.getElementById('bAllIPCustom')?.value||document.getElementById('bAllIP')?.value||'';
+       var count=0;
+       s.rows.forEach(function(row){
+         if(pk){row.packer=pk;count++;}
+         if(ip) row.ip=ip;
+       });
+       if(pk&&!S.knownPackers.includes(pk)) S.knownPackers.push(pk);
+       if(ip&&!S.knownIPs.includes(ip)) S.knownIPs.push(ip);
+       save(); renderSections(); updateDL();
+       toast('Applied to all '+s.rows.length+' rows','success');
+     }}]);
+}
+
 function bulkFill(secId){
   const s=S.sections.find(x=>x.id===secId); if(!s)return;
   const cbs=document.querySelectorAll(`.row-cb[data-sec="${secId}"]:checked`);
@@ -9067,22 +9106,54 @@ function renderInventory(){
   var countEl=document.getElementById('invCount');
   if(!container) return;
   var inv=S.masterInventory||{};
-  var keys=Object.keys(inv).sort();
   var search=(document.getElementById('invSearch')||{}).value||'';
-  if(search){
-    var q=search.toLowerCase();
-    keys=keys.filter(function(sn){return sn.toLowerCase().includes(q);});
-  }
-  if(countEl) countEl.textContent=keys.length+' serial numbers in inventory'+(search?' (filtered from '+Object.keys(inv).length+')':'');
-  if(keys.length===0){
+
+  // Group by systemType
+  var groups={};
+  var groupOrder=[];
+  Object.keys(inv).sort().forEach(function(sn){
+    var item=inv[sn];
+    var sys=item.systemType||'Unknown';
+    if(!groups[sys]){groups[sys]=[];groupOrder.push(sys);}
+    // Apply search filter
+    if(search){
+      var q=search.toLowerCase();
+      if(!sn.toLowerCase().includes(q)) return;
+    }
+    groups[sys].push(sn);
+  });
+
+  var filteredTotal=Object.values(groups).reduce(function(a,g){return a+g.length;},0);
+  if(countEl) countEl.textContent=filteredTotal+' serial numbers'+(search?' (filtered)':'');
+
+  if(filteredTotal===0){
     container.innerHTML='<div style="text-align:center;padding:30px;color:var(--text-muted);">No inventory items'+(search?' matching search':'')+'</div>';
     return;
   }
-  var html='<table class="data-table"><thead><tr>';
+
+  // Active tab
+  var activeInvTab=localStorage.getItem('pms_inv_tab')||groupOrder[0];
+  if(!groups[activeInvTab]||groups[activeInvTab].length===0) activeInvTab=groupOrder[0];
+
+  // Build tabs
+  var html='<div style="display:flex;flex-wrap:wrap;gap:0;margin-bottom:-1px;position:relative;z-index:1;">';
+  groupOrder.forEach(function(sys){
+    if(groups[sys].length===0) return;
+    var isActive=sys===activeInvTab;
+    html+='<div onclick="switchInvTab(\''+sys+'\')" style="padding:8px 16px;font-size:13px;border:0.5px solid var(--border);border-bottom:'+(isActive?'0.5px solid var(--bg-card)':'0.5px solid var(--border)')+';border-radius:8px 8px 0 0;cursor:pointer;margin-right:2px;background:'+(isActive?'var(--bg-card)':'var(--bg-secondary)')+';color:'+(isActive?'var(--accent)':'var(--text-muted)')+';">';
+    html+=sys+' <span style="font-size:10px;padding:1px 6px;border-radius:10px;background:var(--accent-dim);color:var(--accent);margin-left:4px;">'+groups[sys].length+'</span>';
+    html+='</div>';
+  });
+  html+='</div>';
+
+  // Tab content
+  var sysSNs=groups[activeInvTab]||[];
+  html+='<div style="border:0.5px solid var(--border);border-radius:0 8px 8px 8px;padding:12px;background:var(--bg-card);">';
+  html+='<table class="data-table"><thead><tr>';
   html+='<th style="width:32px;"><input type="checkbox" onchange="toggleAllInv(this.checked)"></th>';
-  html+='<th>Serial Number</th><th>DOM</th><th>PIS</th><th>OSD</th><th>Location</th><th style="width:60px;"></th>';
+  html+='<th>Serial Number</th><th>DOM</th><th>PIS</th><th>OSD</th><th>Location</th><th style="width:80px;"></th>';
   html+='</tr></thead><tbody>';
-  keys.forEach(function(sn){
+  sysSNs.forEach(function(sn){
     var item=inv[sn];
     var location='\u2014';
     S.sections.forEach(function(sec){
@@ -9092,19 +9163,52 @@ function renderInventory(){
     });
     html+='<tr>';
     html+='<td><input type="checkbox" class="inv-cb" data-sn="'+esc(sn)+'"></td>';
-    var sysOpts=['T-11','MC-6','RA-1','T-11R','MC-6R','RA-1R','AEBP','MAWC',''].map(function(s){return '<option value="'+s+'"'+(s===(item.systemType||'')?'selected':'')+'>'+(s||'--')+'</option>';}).join('');
-    html+='<td><select style="background:var(--bg-input);border:1px solid var(--border);border-radius:3px;color:var(--text-primary);padding:2px 4px;font-size:10px;outline:none;" onchange="updateInventoryField(\''+esc(sn)+'\',\'systemType\',this.value)">'+sysOpts+'</select></td>';
     html+='<td style="font-weight:600;cursor:pointer;color:var(--accent);" onclick="showChuteHistory(\''+esc(sn)+'\')" title="Click for history">'+esc(sn)+'</td>';
     html+='<td style="font-size:11px;">'+(item.dom||'\u2014')+'</td>';
     html+='<td style="font-size:11px;">'+(item.pis||'\u2014')+'</td>';
     html+='<td style="font-size:11px;">'+(item.osd||'\u2014')+'</td>';
     html+='<td style="font-size:11px;color:var(--text-muted);">'+location+'</td>';
-    html+='<td><button class="row-action-btn delete" onclick="deleteInventoryItem(\''+esc(sn)+'\')">\u2715</button></td>';
+    html+='<td style="display:flex;gap:4px;">';
+    html+='<button class="row-action-btn" onclick="showSingleBarcode(\''+esc(sn)+'\')" title="Show barcode">\u{1F4F7}</button>';
+    html+='<button class="row-action-btn delete" onclick="deleteInventoryItem(\''+esc(sn)+'\')">\u2715</button>';
+    html+='</td>';
     html+='</tr>';
   });
-  html+='</tbody></table>';
+  html+='</tbody></table></div>';
   container.innerHTML=html;
 }
+
+function switchInvTab(sys){
+  localStorage.setItem('pms_inv_tab',sys);
+  renderInventory();
+}
+
+function showSingleBarcode(sn){
+  var overlay=document.createElement('div');
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10010;display:flex;align-items:center;justify-content:center;';
+  overlay.innerHTML='<div style="background:#fff;border-radius:12px;padding:24px;text-align:center;max-width:360px;width:95%;">'
+    +'<div style="font-size:16px;font-weight:700;color:#111;margin-bottom:12px;">'+esc(sn)+'</div>'
+    +'<svg id="singleBarcodeImg" style="width:100%;max-width:300px;display:block;margin:0 auto;"></svg>'
+    +'<div style="display:flex;gap:10px;justify-content:center;margin-top:16px;">'
+    +'<button onclick="printSingleBarcode(\''+esc(sn)+'\')" style="background:#2563eb;border:none;color:#fff;padding:8px 20px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:13px;">🖨 Print</button>'
+    +'<button onclick="this.closest(\'div[style]\').remove()" style="background:#e5e7eb;border:none;color:#111;padding:8px 20px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:13px;">Close</button>'
+    +'</div></div>';
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click',function(e){if(e.target===overlay) overlay.remove();});
+  setTimeout(function(){
+    try{JsBarcode('#singleBarcodeImg',sn,{format:'CODE128',width:2,height:80,displayValue:true,fontSize:14});}catch(e){}
+  },100);
+}
+
+function printSingleBarcode(sn){
+  var body='<div style="text-align:center;padding:20px;">';
+  body+='<div style="font-size:18px;font-weight:700;margin-bottom:16px;">'+esc(sn)+'</div>';
+  body+='<svg id="printBC" style="width:100%;max-width:300px;display:block;margin:0 auto;"></svg>';
+  body+='</div>';
+  body+='<script>setTimeout(function(){try{JsBarcode("#printBC","'+sn+'",{format:"CODE128",width:2,height:80,displayValue:true});}catch(e){}},200);<\/script>';
+  openPrintPreview('Barcode: '+sn, body);
+}
+
 function toggleAllInv(checked){document.querySelectorAll('.inv-cb').forEach(function(cb){cb.checked=checked;});}
 function showAddInventory(){
   showConfirm('Add to Inventory',
@@ -10524,284 +10628,179 @@ var _scanActive=false;
 // ══════════════════════════════════════════════
 // DATA BLOCK PHOTO SCAN — Claude Vision API
 // ══════════════════════════════════════════════
-function openDataBlockScan(secId, rowIdx){
-  // Build the modal with camera capture / file upload
-  var overlay=document.createElement('div');
-  overlay.id='dataBlockOverlay';
-  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:10002;display:flex;align-items:center;justify-content:center;';
+// ══ GUIDED SCAN WORKFLOW ══
+var _scanWorkflow = null;
 
-  overlay.innerHTML=`
-    <div style="background:var(--bg-card);border-radius:12px;padding:24px;max-width:480px;width:95%;text-align:center;">
-      <div style="font-size:16px;font-weight:700;margin-bottom:6px;">📷 Scan Data Block</div>
-      <div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">Take a photo of the parachute data block or choose an image. The AI will read the serial number, DOM, and PIS automatically.</div>
-
-      <div id="dbScanPreview" style="display:none;margin-bottom:12px;">
-        <img id="dbScanImg" style="max-width:100%;max-height:240px;border-radius:8px;border:1px solid var(--border);">
-      </div>
-
-      <div id="dbScanStatus" style="font-size:13px;color:var(--accent);margin-bottom:12px;display:none;"></div>
-
-      <div id="dbScanResult" style="display:none;background:var(--bg-secondary);border-radius:8px;padding:12px;margin-bottom:16px;text-align:left;">
-        <div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">DETECTED VALUES — tap to edit before saving:</div>
-        <div style="display:grid;grid-template-columns:80px 1fr;gap:6px;align-items:center;font-size:13px;">
-          <label style="color:var(--text-muted);">Serial No.</label>
-          <input id="dbRes_sn" style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:5px 8px;font-size:13px;outline:none;width:100%;box-sizing:border-box;">
-          <label style="color:var(--text-muted);">DOM</label>
-          <input id="dbRes_dom" placeholder="MMYY" style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:5px 8px;font-size:13px;outline:none;width:100%;box-sizing:border-box;">
-          <label style="color:var(--text-muted);">PIS</label>
-          <input id="dbRes_pis" placeholder="MMYY" style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:5px 8px;font-size:13px;outline:none;width:100%;box-sizing:border-box;">
-        </div>
-      </div>
-
-      <div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">
-        <label style="background:var(--accent);color:#fff;padding:9px 18px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">
-          📸 Take / Choose Photo
-          <input type="file" id="dbScanInput" accept="image/*" capture="environment" style="display:none;" onchange="handleDataBlockPhoto(event,${secId},${rowIdx})">
-        </label>
-        <button id="dbApplyBtn" style="display:none;background:var(--success);color:#fff;border:none;padding:9px 18px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;" onclick="applyDataBlockResult(${secId},${rowIdx})">✓ Apply to Row</button>
-        <button style="background:none;border:1px solid var(--border);color:var(--text-muted);padding:9px 18px;border-radius:6px;cursor:pointer;font-size:13px;" onclick="document.getElementById('dataBlockOverlay').remove()">Cancel</button>
-      </div>
-    </div>`;
-
-  document.body.appendChild(overlay);
+function openGuidedScan(secId, rowIdx){
+  _scanWorkflow = {secId:secId, rowIdx:rowIdx, step:'serial'};
+  _openScannerForStep();
 }
 
-async function handleDataBlockPhoto(event, secId, rowIdx){
-  var file=event.target.files[0];
-  if(!file) return;
-
-  // Show preview
-  var reader=new FileReader();
-  reader.onload=async function(e){
-    var dataUrl=e.target.result;
-    var img=document.getElementById('dbScanImg');
-    var preview=document.getElementById('dbScanPreview');
-    var status=document.getElementById('dbScanStatus');
-    var result=document.getElementById('dbScanResult');
-    var applyBtn=document.getElementById('dbApplyBtn');
-
-    if(img) img.src=dataUrl;
-    if(preview) preview.style.display='block';
-    if(status){ status.textContent='🔍 Reading data block…'; status.style.display='block'; }
-    if(result) result.style.display='none';
-    if(applyBtn) applyBtn.style.display='none';
-
-    // Strip the data URL prefix to get base64
-    var base64=dataUrl.split(',')[1];
-    var mimeType=file.type||'image/jpeg';
-
-    try{
-      var response=await fetch('https://api.anthropic.com/v1/messages',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({
-          model:'claude-sonnet-4-20250514',
-          max_tokens:300,
-          messages:[{
-            role:'user',
-            content:[
-              {
-                type:'image',
-                source:{type:'base64',media_type:mimeType,data:base64}
-              },
-              {
-                type:'text',
-                text:'This is a photo of a military parachute data block. Extract the following fields and respond ONLY with valid JSON, no other text:\n{\n  "serialNumber": "the serial number (numbers only, no dashes or spaces)",\n  "dom": "date of manufacture as MMYY format (e.g. 0312 for March 2012)",\n  "pis": "put in service date as MMYY format (e.g. 0614 for June 2014)"\n}\nIf a field is not visible or unreadable, use an empty string. Do not include any explanation.'
-              }
-            ]
-          }]
-        })
-      });
-
-      var data=await response.json();
-      var text=(data.content||[]).map(function(c){return c.text||'';}).join('');
-
-      // Parse JSON from response
-      var parsed=null;
-      try{
-        var clean=text.replace(/```json|```/g,'').trim();
-        parsed=JSON.parse(clean);
-      }catch(pe){
-        // Try to extract JSON from anywhere in the text
-        var match=text.match(/\{[\s\S]*\}/);
-        if(match) try{ parsed=JSON.parse(match[0]); }catch(e2){}
-      }
-
-      if(!parsed){
-        if(status){ status.textContent='❌ Could not read data block. Try a clearer photo.'; status.style.color='var(--danger)'; }
-        return;
-      }
-
-      // Fill result fields
-      var snEl=document.getElementById('dbRes_sn');
-      var domEl=document.getElementById('dbRes_dom');
-      var pisEl=document.getElementById('dbRes_pis');
-      if(snEl) snEl.value=parsed.serialNumber||'';
-      if(domEl) domEl.value=parsed.dom||'';
-      if(pisEl) pisEl.value=parsed.pis||'';
-
-      if(status){ status.textContent='✅ Data block read successfully. Review and apply.'; status.style.color='var(--success)'; }
-      if(result) result.style.display='block';
-      if(applyBtn) applyBtn.style.display='inline-block';
-
-    }catch(err){
-      if(status){ status.textContent='❌ Error: '+err.message+'. Check connection and try again.'; status.style.color='var(--danger)'; }
-    }
-  };
-  reader.readAsDataURL(file);
+function _openScannerForStep(){
+  if(!_scanWorkflow) return;
+  var labels={serial:'Scan Serial Number',packer:'Scan Packer Name',ip:'Scan IP Name'};
+  openBarcodeScanner(function(code){ _handleGuidedScanResult(code); }, labels[_scanWorkflow.step]||'Scan');
 }
 
-function applyDataBlockResult(secId, rowIdx){
-  var sn=(document.getElementById('dbRes_sn')||{}).value||'';
-  var dom=(document.getElementById('dbRes_dom')||{}).value||'';
-  var pis=(document.getElementById('dbRes_pis')||{}).value||'';
-
+function _handleGuidedScanResult(code){
+  if(!_scanWorkflow) return;
+  var secId=_scanWorkflow.secId, rowIdx=_scanWorkflow.rowIdx, step=_scanWorkflow.step;
   var sec=S.sections.find(function(s){return s.id===secId;});
-  if(!sec||!sec.rows[rowIdx]){ toast('Row not found','error'); return; }
-
+  if(!sec) return;
+  if(!sec.rows[rowIdx]) sec.rows[rowIdx]={};
   var row=sec.rows[rowIdx];
-
-  if(sn) row.serialNumber=sn.trim();
-  if(dom) row.dom=dom.trim();
-  if(pis) row.pis=pis.trim();
-
-  // Recalc OSD
-  if(row.dom&&row.pis) row.osd=calcOSDString(row.dom,row.pis)||'';
-
-  // Update master inventory
-  if(sn.trim()&&(dom.trim()||pis.trim())){
-    if(!S.masterInventory) S.masterInventory={};
-    if(!S.masterInventory[sn.trim()]) S.masterInventory[sn.trim()]={};
-    if(dom.trim()) S.masterInventory[sn.trim()].dom=dom.trim();
-    if(pis.trim()) S.masterInventory[sn.trim()].pis=pis.trim();
+  if(step==='serial'){
+    row.serialNumber=code;
+    save(); renderSections();
+    _scanWorkflow.step='packer';
+    _updateScanStepLabel('Scan Packer Name', code);
+  } else if(step==='packer'){
+    var nm=_codeToName(code); row.packer=nm||code;
+    save(); renderSections();
+    _scanWorkflow.step='ip';
+    _updateScanStepLabel('Scan IP Name', row.packer);
+  } else if(step==='ip'){
+    var nm=_codeToName(code); row.ip=nm||code;
+    save(); renderSections();
+    _scanWorkflow=null;
+    toast('Row complete: '+row.serialNumber+' / '+row.packer+' / '+row.ip,'success',3000);
+    closeBarcodeScanner();
   }
-
-  auditLog('section','Data Block Scan','Scanned S/N '+sn+' DOM '+dom+' PIS '+pis+' into '+sec.binLocation);
-  save();
-
-  // Re-render just that row
-  var tr=document.querySelector(`tr[data-sec="${secId}"][data-ri="${rowIdx}"]`)||
-         document.querySelector(`#tb-${secId}`)?.querySelectorAll('tr')[rowIdx];
-  if(tr){
-    var tmp=document.createElement('tbody');
-    tmp.innerHTML=rowHTML(sec,row,rowIdx);
-    tr.replaceWith(tmp.firstChild);
-  } else {
-    renderSections();
-  }
-
-  document.getElementById('dataBlockOverlay')?.remove();
-  toast('Data block applied to row — S/N: '+sn,'success');
 }
 
-function openBarcodeScanner(callback){
-  if(_scanActive) return;
+function _codeToName(code){
+  if(code.startsWith('PMS-NAME-')) return code.replace('PMS-NAME-','');
+  var user=getUsers().find(function(u){return (u.lastName||u.name).toUpperCase()===code.toUpperCase();});
+  return user?(user.lastName||user.name):null;
+}
+
+function _updateScanStepLabel(label, prevValue){
+  var el=document.getElementById('scanStepLabel');
+  if(el){ el.textContent=label; }
+  var prev=document.getElementById('scanPrevValue');
+  if(prev) prev.textContent=prevValue?('Scanned: '+prevValue):'';
+}
+
+function _cancelGuidedScan(){
+  _scanWorkflow=null;
+  closeBarcodeScanner();
+}
+
+function openDataBlockScan(secId, rowIdx){ openGuidedScan(secId, rowIdx); }
+
+function printNameBarcodes(){
+  var users=getUsers().filter(function(u){return u.role!=='pending';});
+  var is='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:7px 10px;font-size:13px;font-family:inherit;outline:none;width:100%;box-sizing:border-box;';
+  // Ask for any temp names to add
+  showConfirm('Print Name Barcodes',
+    '<div style="text-align:left;">'
+    +'<div style="font-size:13px;margin-bottom:8px;">Active users will be included automatically.</div>'
+    +'<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Add temporary names (comma separated) for visitors or new personnel not yet in the system:</div>'
+    +'<input type="text" id="tempNameInput" placeholder="e.g. Johnson, Martinez, Kim" style="'+is+'">'
+    +'<div style="font-size:10px;color:var(--text-muted);margin-top:4px;">These are print-only — no account is created.</div>'
+    +'</div>',
+    [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
+     {label:'Print Barcodes',cls:'btn-primary',fn:function(){
+       var tempInput=(document.getElementById('tempNameInput')||{}).value||'';
+       var tempNames=tempInput.split(',').map(function(n){return n.trim();}).filter(function(n){return n.length>0;});
+       _doPrintNameBarcodes(users, tempNames);
+     }}]);
+}
+
+function _doPrintNameBarcodes(users, tempNames){
+  var printed=new Date().toLocaleDateString();
+  var allEntries=users.map(function(u){return {name:u.lastName||u.name, temp:false};});
+  tempNames.forEach(function(n){allEntries.push({name:n,temp:true});});
+  if(allEntries.length===0){toast('No names to print','warning');return;}
+
+  var body='<h1>Staff Name Barcodes</h1>';
+  body+='<div class="header-info">Scan to assign Packer / IP in RPR — Generated: '+printed+'</div>';
+  body+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:20px;">';
+  allEntries.forEach(function(entry){
+    var code='PMS-NAME-'+entry.name;
+    body+='<div style="text-align:center;border:1px solid '+(entry.temp?'#f59e0b':'#ccc')+';border-radius:8px;padding:14px;">';
+    body+='<div style="font-size:16px;font-weight:700;margin-bottom:8px;">'+esc(entry.name)+(entry.temp?' <span style="font-size:10px;color:#f59e0b;font-weight:400;">(temp)</span>':'')+'</div>';
+    body+='<svg class="name-bc" data-code="'+esc(code)+'" style="width:100%;max-width:200px;display:block;margin:0 auto;"></svg>';
+    body+='<div style="font-size:9px;color:#888;margin-top:4px;">'+esc(code)+'</div>';
+    body+='</div>';
+  });
+  body+='</div>';
+  body+='<div class="footer">Parachute Management System — Name Barcodes — '+printed+'</div>';
+  body+='<script>setTimeout(function(){document.querySelectorAll(".name-bc").forEach(function(svg){try{JsBarcode(svg,svg.dataset.code,{format:"CODE128",width:1.8,height:60,displayValue:false});}catch(e){}});},200);<\/script>';
+  openPrintPreview('Staff Name Barcodes', body);
+}
+
+function addScanButton(inputId, secId){
+  return '<button class="btn btn-secondary" style="padding:4px 8px;font-size:12px;" onclick="openBarcodeScanner(function(code){var inp=document.getElementById(\''+inputId+'\');if(inp){inp.value=code;inp.dispatchEvent(new Event(\'change\',{bubbles:true}));}})" title="Scan barcode">\uD83D\uDCF7</button>';
+}
+
+
+var _scanCallback=null;
+
+function openBarcodeScanner(callback, stepLabel){
   _scanCallback=callback;
-  _scanActive=true;
-  
   var overlay=document.createElement('div');
   overlay.id='scannerOverlay';
-  overlay.style.cssText='position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.95);z-index:10000;display:flex;flex-direction:column;align-items:center;justify-content:center;';
-  
-  overlay.innerHTML='<div style="color:#fff;font-size:16px;font-weight:600;margin-bottom:12px;">Scan Barcode</div>'+
-    '<div id="scannerViewport" style="width:90%;max-width:400px;height:300px;border:2px solid #6366f1;border-radius:8px;overflow:hidden;position:relative;background:#000;">'+
-    '<div style="position:absolute;top:50%;left:10%;right:10%;height:2px;background:rgba(239,68,68,0.7);z-index:1;"></div>'+
-    '</div>'+
-    '<div id="scannerResult" style="color:#6366f1;font-size:14px;font-weight:600;margin-top:12px;min-height:20px;">Requesting camera...</div>'+
-    '<div style="margin-top:16px;display:flex;gap:12px;">'+
-    '<button onclick="closeBarcodeScanner()" style="padding:10px 24px;background:#374151;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer;">Cancel</button>'+
-    '</div>';
-  
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:10010;display:flex;align-items:center;justify-content:center;padding:16px;';
+  overlay.innerHTML='<div style="position:relative;width:100%;max-width:480px;">'
+    +'<div style="text-align:center;margin-bottom:12px;background:rgba(0,0,0,0.6);border-radius:8px;padding:10px;">'
+    +'<div id="scanPrevValue" style="font-size:11px;color:#4ade80;min-height:14px;"></div>'
+    +'<div id="scanStepLabel" style="font-size:16px;font-weight:700;color:#fff;">'+(stepLabel||'Scan Barcode')+'</div>'
+    +'<button onclick="_cancelGuidedScan()" style="margin-top:4px;background:none;border:none;color:#f87171;cursor:pointer;font-size:11px;font-family:inherit;">\u2715 Cancel</button>'
+    +'</div>'
+    +'<div id="scannerBox" style="width:100%;aspect-ratio:4/3;border-radius:10px;overflow:hidden;background:#000;position:relative;">'
+    +'<video id="scannerVideo" style="width:100%;height:100%;object-fit:cover;" playsinline muted></video>'
+    +'<div style="position:absolute;inset:0;border:2px solid rgba(59,130,246,0.6);border-radius:10px;pointer-events:none;"></div>'
+    +'</div>'
+    +'<div style="text-align:center;margin-top:12px;">'
+    +'<button onclick="closeBarcodeScanner()" style="background:rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.2);color:#fff;padding:8px 24px;border-radius:6px;cursor:pointer;font-family:inherit;">Close</button>'
+    +'</div></div>';
   document.body.appendChild(overlay);
-  
+
   if(typeof Quagga==='undefined'){
-    document.getElementById('scannerResult').textContent='Scanner library not loaded. Check internet.';
+    toast('Camera scanner not available','error');
+    overlay.remove();
     return;
   }
-  
-  // Request camera permission explicitly, then start scanner
-  if(navigator.mediaDevices && navigator.mediaDevices.getUserMedia){
+  if(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia){
     navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}}).then(function(stream){
-      // Got permission - stop test stream and start Quagga
-      stream.getTracks().forEach(function(t){t.stop();});
-      document.getElementById('scannerResult').textContent='Camera ready...';
-      initQuaggaScanner();
-    }).catch(function(err){
-      document.getElementById('scannerResult').textContent='Camera denied: '+(err.message||err);
+      var vid=document.getElementById('scannerVideo');
+      if(vid){vid.srcObject=stream;vid.play();}
+      _initQuaggaScanner();
+    }).catch(function(e){
+      toast('Camera access denied: '+e.message,'error');
+      overlay.remove();
     });
   } else {
-    document.getElementById('scannerResult').textContent='Camera not available on this device.';
+    toast('Camera not supported on this device/browser','error');
+    overlay.remove();
   }
 }
 
-function initQuaggaScanner(){
+function _initQuaggaScanner(){
   Quagga.init({
-    inputStream:{
-      name:"Live",type:"LiveStream",
-      target:document.getElementById('scannerViewport'),
-      constraints:{facingMode:"environment",width:{ideal:640},height:{ideal:480}}
-    },
-    decoder:{readers:["code_128_reader","code_39_reader","ean_reader","ean_8_reader"]},
-    locate:true,frequency:10
-  }, function(err){
-    if(err){
-      console.log('Scanner error:',err);
-      var el=document.getElementById('scannerResult');
-      if(el) el.textContent='Camera error: '+(err.message||err);
-      return;
-    }
+    inputStream:{name:'Live',type:'LiveStream',target:document.getElementById('scannerVideo'),
+      constraints:{width:640,height:480,facingMode:'environment'}},
+    decoder:{readers:['code_128_reader','code_39_reader','ean_reader','upc_reader']},
+    locate:true
+  },function(err){
+    if(err){toast('Scanner init error: '+err,'error');closeBarcodeScanner();return;}
     Quagga.start();
-    var el=document.getElementById('scannerResult');
-    if(el) el.textContent='Point at barcode...';
   });
-  
   Quagga.onDetected(function(result){
-    var code=result.codeResult.code;
+    var code=result&&result.codeResult&&result.codeResult.code;
     if(!code) return;
-    
-    var el=document.getElementById('scannerResult');
-    if(el) el.textContent='Scanned: '+code;
-    if(navigator.vibrate) navigator.vibrate(100);
-    
-    var found=false;var location='';
-    // Check if scanned code is a bin location
-    var binMatch=S.sections.find(function(sec){return sec.binLocation===code;});
-    if(binMatch){
-      found=true;location='BIN: '+binMatch.binLocation+' ('+binMatch.systemType+') - '+binMatch.rows.length+' chutes';
-      // Show bin contents after a short delay
-      setTimeout(function(){showBinContents(binMatch.id);},500);
-    }
-    S.sections.forEach(function(sec){sec.rows.forEach(function(r){
-      if(r.serialNumber===code){found=true;location=sec.binLocation+' ('+sec.systemType+')';}
-    });});
-    if(!found&&S.masterInventory&&S.masterInventory[code]){found=true;location='Inventory (not in a section)';}
-    if(!found){(S.signedOut||[]).forEach(function(so){(so.scannedOut||[]).forEach(function(s){
-      if(s.sn===code){found=true;location='Signed out to '+(so.unit||'?');}
-    });});}
-    
-    closeBarcodeScanner();
-    if(_scanCallback) _scanCallback(code);
-    
-    setTimeout(function(){
-      if(found) toast(code+' found: '+location,'info',3000);
-      else toast(code+' not found in system - new serial number','warning',4000);
-    },300);
+    var cb=_scanCallback;
+    if(cb){cb(code);}
   });
 }
 
-
 function closeBarcodeScanner(){
-  _scanActive=false;
   try{Quagga.stop();}catch(e){}
   try{Quagga.offDetected();}catch(e){}
   var overlay=document.getElementById('scannerOverlay');
   if(overlay) overlay.remove();
   _scanCallback=null;
-}
-
-// Helper to add scan button next to an input
-function addScanButton(inputId, secId){
-  return '<button class="btn btn-secondary" style="padding:4px 8px;font-size:12px;" onclick="openBarcodeScanner(function(code){var inp=document.getElementById(\''+inputId+'\');if(inp){inp.value=code;inp.dispatchEvent(new Event(\'change\',{bubbles:true}));}})" title="Scan barcode">\u{1F4F7}</button>';
 }
 
 // ══ TAB NAVIGATION ══
