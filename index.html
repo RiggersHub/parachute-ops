@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v4.90.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v5.00.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -3380,7 +3380,7 @@ function sectionHTML(sec){
       <div style="display:flex;gap:6px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);margin-bottom:6px;">
         <span style="font-size:11px;font-weight:600;color:var(--text-muted);white-space:nowrap;">Quick Entry:</span>
         <input type="text" class="form-input" id="qscan-${sec.id}" placeholder="Scan/type S/N..." style="flex:1;font-size:13px;padding:6px 10px;" onkeydown="if(event.key==='Enter')quickScanEntry(${sec.id})">
-        <button class="btn btn-secondary btn-sm" onclick="openBarcodeScanner(function(code){document.getElementById('qscan-${sec.id}').value=code;quickScanEntry(${sec.id})})" title="Camera scan" style="padding:6px 8px;">\u{1F4F7}</button>
+        <button class="btn btn-secondary btn-sm" onclick="quickScanWithGuide(${sec.id})" title="Camera scan — serial then packer/IP" style="padding:6px 8px;">📷</button>
         <button class="btn btn-primary btn-sm" onclick="quickScanEntry(${sec.id})">Add</button>
       </div>
       <div class="section-table-scroll" id="scroll-${sec.id}"><table class="data-table">
@@ -3419,7 +3419,7 @@ function rowHTML(sec,r,i){
     <td><input type="text" list="ip-list" value="${esc(r.ip)}" placeholder="IP" onchange="onIP(${sec.id},${i},this.value,this)" class="tab-field" ${dis}></td>
     <td><input type="date" value="${r.packDate||''}" onchange="upd(${sec.id},${i},'packDate',this.value)" style="width:115px;" class="tab-field" ${dis}></td>
     <td><div class="row-actions">
-      <button class="row-action-btn" onclick="quickScanEntry(${sec.id})" title="Scan serial number">📷</button>
+      <button class="row-action-btn" onclick="openGuidedScan(${sec.id},${i})" title="Guided scan: serial → packer → IP">📷</button>
       <button class="row-action-btn" onclick="toggleLock(${sec.id},${i})" title="${locked?'Unlock to edit':'Lock row'}">${locked?'🔒':'✏️'}</button>
       <button class="row-action-btn delete" onclick="delRow(${sec.id},${i})" title="Delete">🗑</button>
     </div></td>
@@ -9324,6 +9324,31 @@ function openBarcodePreview(serialNumbers){
 }
 
 // ══ QUICK SCAN ENTRY (RPR) ══
+function quickScanWithGuide(secId){
+  // Step 1: scan serial number
+  openBarcodeScanner(function(code){
+    // Put code in the quick scan input and add the row
+    var inp=document.getElementById('qscan-'+secId);
+    if(inp) inp.value=code;
+    quickScanEntry(secId);
+    // Find the new row index (last row in section)
+    var sec=S.sections.find(function(x){return x.id===secId;});
+    if(!sec||sec.rows.length===0) return;
+    var rowIdx=sec.rows.length-1;
+    // Close scanner and launch packer/IP steps
+    closeBarcodeScanner();
+    setTimeout(function(){
+      _scanWorkflow={secId:secId, rowIdx:rowIdx, step:'packer'};
+      openBarcodeScanner(function(code2){_handleGuidedScanResult(code2);}, 'Scan Packer Name');
+      // Update step label to show serial was confirmed
+      setTimeout(function(){
+        var prev=document.getElementById('scanPrevValue');
+        if(prev) prev.textContent='Scanned: '+code;
+      },100);
+    },400);
+  },'Scan Serial Number');
+}
+
 function quickScanEntry(secId){
   var inp=document.getElementById('qscan-'+secId);
   if(!inp) return;
