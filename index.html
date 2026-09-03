@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v4.80.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v4.90.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -9184,28 +9184,33 @@ function switchInvTab(sys){
 }
 
 function showSingleBarcode(sn){
+  var tempSvg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+  tempSvg.style.cssText='width:100%;max-width:300px;display:block;margin:0 auto;';
+  try{JsBarcode(tempSvg,sn,{format:'CODE128',width:2,height:80,displayValue:true,fontSize:14});}catch(e){}
+  var svgStr=tempSvg.outerHTML;
+
   var overlay=document.createElement('div');
   overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10010;display:flex;align-items:center;justify-content:center;';
-  overlay.innerHTML='<div style="background:#fff;border-radius:12px;padding:24px;text-align:center;max-width:360px;width:95%;">'
+  overlay.innerHTML='<div style="background:#fff;border-radius:12px;padding:24px;text-align:center;max-width:380px;width:95%;">'
     +'<div style="font-size:16px;font-weight:700;color:#111;margin-bottom:12px;">'+esc(sn)+'</div>'
-    +'<svg id="singleBarcodeImg" style="width:100%;max-width:300px;display:block;margin:0 auto;"></svg>'
+    +svgStr
     +'<div style="display:flex;gap:10px;justify-content:center;margin-top:16px;">'
     +'<button onclick="printSingleBarcode(\''+esc(sn)+'\')" style="background:#2563eb;border:none;color:#fff;padding:8px 20px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:13px;">🖨 Print</button>'
-    +'<button onclick="this.closest(\'div[style]\').remove()" style="background:#e5e7eb;border:none;color:#111;padding:8px 20px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:13px;">Close</button>'
+    +'<button onclick="this.closest(\'[style]\').remove()" style="background:#e5e7eb;border:none;color:#111;padding:8px 20px;border-radius:6px;cursor:pointer;font-family:inherit;font-size:13px;">Close</button>'
     +'</div></div>';
   document.body.appendChild(overlay);
   overlay.addEventListener('click',function(e){if(e.target===overlay) overlay.remove();});
-  setTimeout(function(){
-    try{JsBarcode('#singleBarcodeImg',sn,{format:'CODE128',width:2,height:80,displayValue:true,fontSize:14});}catch(e){}
-  },100);
 }
 
 function printSingleBarcode(sn){
-  var body='<div style="text-align:center;padding:20px;">';
-  body+='<div style="font-size:18px;font-weight:700;margin-bottom:16px;">'+esc(sn)+'</div>';
-  body+='<svg id="printBC" style="width:100%;max-width:300px;display:block;margin:0 auto;"></svg>';
+  var tempSvg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+  try{JsBarcode(tempSvg,sn,{format:'CODE128',width:2,height:80,displayValue:true,fontSize:14});}catch(e){}
+  var svgStr=tempSvg.outerHTML;
+  var body='<div style="text-align:center;padding:30px;">';
+  body+='<div style="font-size:20px;font-weight:700;margin-bottom:16px;color:#111;">'+esc(sn)+'</div>';
+  body+=svgStr;
   body+='</div>';
-  body+='<script>setTimeout(function(){try{JsBarcode("#printBC","'+sn+'",{format:"CODE128",width:2,height:80,displayValue:true});}catch(e){}},200);<\/script>';
+  body+='<div class="footer">Parachute Management System — Barcode: '+esc(sn)+'</div>';
   openPrintPreview('Barcode: '+sn, body);
 }
 
@@ -10691,42 +10696,62 @@ function openDataBlockScan(secId, rowIdx){ openGuidedScan(secId, rowIdx); }
 function printNameBarcodes(){
   var users=getUsers().filter(function(u){return u.role!=='pending';});
   var is='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:7px 10px;font-size:13px;font-family:inherit;outline:none;width:100%;box-sizing:border-box;';
-  // Ask for any temp names to add
+
+  // Build checklist of existing users
+  var userChecks=users.map(function(u){
+    var name=u.lastName||u.name;
+    return '<label style="display:flex;align-items:center;gap:8px;padding:5px 0;cursor:pointer;">'
+      +'<input type="checkbox" class="nbcCheck" value="'+esc(name)+'" checked style="width:15px;height:15px;">'
+      +'<span style="font-size:13px;">'+esc(name)+'</span>'
+      +'</label>';
+  }).join('');
+
   showConfirm('Print Name Barcodes',
     '<div style="text-align:left;">'
-    +'<div style="font-size:13px;margin-bottom:8px;">Active users will be included automatically.</div>'
-    +'<div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Add temporary names (comma separated) for visitors or new personnel not yet in the system:</div>'
-    +'<input type="text" id="tempNameInput" placeholder="e.g. Johnson, Martinez, Kim" style="'+is+'">'
-    +'<div style="font-size:10px;color:var(--text-muted);margin-top:4px;">These are print-only — no account is created.</div>'
+    +'<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px;">Select who to include:</div>'
+    +'<div style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:8px;margin-bottom:12px;">'
+    +userChecks
+    +'</div>'
+    +'<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Temporary names (one per line — no account created):</div>'
+    +'<textarea id="tempNameInput" rows="3" placeholder="Johnson&#10;Martinez&#10;Kim" style="'+is+'resize:vertical;"></textarea>'
     +'</div>',
     [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
-     {label:'Print Barcodes',cls:'btn-primary',fn:function(){
+     {label:'Print',cls:'btn-primary',fn:function(){
+       var selected=Array.from(document.querySelectorAll('.nbcCheck:checked')).map(function(cb){return {name:cb.value,temp:false};});
        var tempInput=(document.getElementById('tempNameInput')||{}).value||'';
-       var tempNames=tempInput.split(',').map(function(n){return n.trim();}).filter(function(n){return n.length>0;});
-       _doPrintNameBarcodes(users, tempNames);
+       var tempNames=tempInput.split('\n').map(function(n){return n.trim();}).filter(function(n){return n.length>0;});
+       tempNames.forEach(function(n){selected.push({name:n,temp:true});});
+       if(selected.length===0){toast('Select at least one name','warning');return;}
+       _doPrintNameBarcodes(selected);
      }}]);
 }
 
-function _doPrintNameBarcodes(users, tempNames){
+function _doPrintNameBarcodes(entries){
   var printed=new Date().toLocaleDateString();
-  var allEntries=users.map(function(u){return {name:u.lastName||u.name, temp:false};});
-  tempNames.forEach(function(n){allEntries.push({name:n,temp:true});});
-  if(allEntries.length===0){toast('No names to print','warning');return;}
+
+  // Generate SVG strings using JsBarcode in main page context
+  var svgParts=entries.map(function(entry){
+    var code='PMS-NAME-'+entry.name;
+    // Create a temporary SVG element to render into
+    var tempSvg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+    try{
+      JsBarcode(tempSvg,code,{format:'CODE128',width:2,height:60,displayValue:false,margin:4});
+    }catch(e){ return null; }
+    var svgStr=tempSvg.outerHTML;
+    return {entry:entry, code:code, svg:svgStr};
+  }).filter(function(x){return x!==null;});
 
   var body='<h1>Staff Name Barcodes</h1>';
-  body+='<div class="header-info">Scan to assign Packer / IP in RPR — Generated: '+printed+'</div>';
+  body+='<div class="header-info">Scan to assign Packer / IP in RPR &nbsp;|&nbsp; Generated: '+printed+'</div>';
   body+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:20px;">';
-  allEntries.forEach(function(entry){
-    var code='PMS-NAME-'+entry.name;
-    body+='<div style="text-align:center;border:1px solid '+(entry.temp?'#f59e0b':'#ccc')+';border-radius:8px;padding:14px;">';
-    body+='<div style="font-size:16px;font-weight:700;margin-bottom:8px;">'+esc(entry.name)+(entry.temp?' <span style="font-size:10px;color:#f59e0b;font-weight:400;">(temp)</span>':'')+'</div>';
-    body+='<svg class="name-bc" data-code="'+esc(code)+'" style="width:100%;max-width:200px;display:block;margin:0 auto;"></svg>';
-    body+='<div style="font-size:9px;color:#888;margin-top:4px;">'+esc(code)+'</div>';
+  svgParts.forEach(function(item){
+    body+='<div style="text-align:center;border:1px solid '+(item.entry.temp?'#f59e0b':'#ccc')+';border-radius:8px;padding:14px;">';
+    body+='<div style="font-size:16px;font-weight:700;margin-bottom:8px;color:#111;">'+esc(item.entry.name)+(item.entry.temp?' <span style="font-size:10px;color:#f59e0b;">(temp)</span>':'')+'</div>';
+    body+=item.svg;
     body+='</div>';
   });
   body+='</div>';
   body+='<div class="footer">Parachute Management System — Name Barcodes — '+printed+'</div>';
-  body+='<script>setTimeout(function(){document.querySelectorAll(".name-bc").forEach(function(svg){try{JsBarcode(svg,svg.dataset.code,{format:"CODE128",width:1.8,height:60,displayValue:false});}catch(e){}});},200);<\/script>';
   openPrintPreview('Staff Name Barcodes', body);
 }
 
