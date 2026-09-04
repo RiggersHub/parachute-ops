@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v5.00.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v5.10.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -9325,27 +9325,24 @@ function openBarcodePreview(serialNumbers){
 
 // ══ QUICK SCAN ENTRY (RPR) ══
 function quickScanWithGuide(secId){
-  // Step 1: scan serial number
+  _lastScanTime=0;
   openBarcodeScanner(function(code){
-    // Put code in the quick scan input and add the row
     var inp=document.getElementById('qscan-'+secId);
     if(inp) inp.value=code;
     quickScanEntry(secId);
-    // Find the new row index (last row in section)
     var sec=S.sections.find(function(x){return x.id===secId;});
     if(!sec||sec.rows.length===0) return;
     var rowIdx=sec.rows.length-1;
-    // Close scanner and launch packer/IP steps
     closeBarcodeScanner();
     setTimeout(function(){
-      _scanWorkflow={secId:secId, rowIdx:rowIdx, step:'packer'};
-      openBarcodeScanner(function(code2){_handleGuidedScanResult(code2);}, 'Scan Packer Name');
-      // Update step label to show serial was confirmed
+      _lastScanTime=Date.now(); // reset cooldown for next step
+      _scanWorkflow={secId:secId,rowIdx:rowIdx,step:'packer'};
+      openBarcodeScanner(function(code2){_handleGuidedScanResult(code2);},'Scan Packer Name');
       setTimeout(function(){
         var prev=document.getElementById('scanPrevValue');
         if(prev) prev.textContent='Scanned: '+code;
-      },100);
-    },400);
+      },150);
+    },500);
   },'Scan Serial Number');
 }
 
@@ -10660,9 +10657,12 @@ var _scanActive=false;
 // ══════════════════════════════════════════════
 // ══ GUIDED SCAN WORKFLOW ══
 var _scanWorkflow = null;
+var _lastScanTime = 0;
+var _scanCooldownMs = 2000; // 2 second cooldown between scans
 
 function openGuidedScan(secId, rowIdx){
   _scanWorkflow = {secId:secId, rowIdx:rowIdx, step:'serial'};
+  _lastScanTime = 0;
   _openScannerForStep();
 }
 
@@ -10674,28 +10674,74 @@ function _openScannerForStep(){
 
 function _handleGuidedScanResult(code){
   if(!_scanWorkflow) return;
+
+  // Cooldown — ignore rapid repeat scans
+  var now=Date.now();
+  if(now-_lastScanTime<_scanCooldownMs){
+    return; // same barcode still in frame, ignore
+  }
+  _lastScanTime=now;
+
   var secId=_scanWorkflow.secId, rowIdx=_scanWorkflow.rowIdx, step=_scanWorkflow.step;
   var sec=S.sections.find(function(s){return s.id===secId;});
   if(!sec) return;
   if(!sec.rows[rowIdx]) sec.rows[rowIdx]={};
   var row=sec.rows[rowIdx];
+
   if(step==='serial'){
+    // Validate system type — check if this serial exists in another system
+    var conflict=null;
+    S.sections.forEach(function(s){
+      if(s.id===secId) return;
+      s.rows.forEach(function(r){
+        if(r.serialNumber===code) conflict={bin:s.binLocation,sys:s.systemType};
+      });
+    });
+    if(conflict){
+      _showScanFeedback('⚠ Already in '+conflict.bin+' ('+conflict.sys+')', '#f97316', false);
+      return;
+    }
     row.serialNumber=code;
     save(); renderSections();
     _scanWorkflow.step='packer';
+    _showScanFeedback('✓ Serial: '+code, '#4ade80', true);
     _updateScanStepLabel('Scan Packer Name', code);
+
   } else if(step==='packer'){
-    var nm=_codeToName(code); row.packer=nm||code;
+    var nm=_codeToName(code);
+    row.packer=nm||code;
     save(); renderSections();
     _scanWorkflow.step='ip';
-    _updateScanStepLabel('Scan IP Name', row.packer);
+    _showScanFeedback('✓ Packer: '+(nm||code), '#4ade80', true);
+    _updateScanStepLabel('Scan IP Name', nm||code);
+
   } else if(step==='ip'){
-    var nm=_codeToName(code); row.ip=nm||code;
+    var nm=_codeToName(code);
+    row.ip=nm||code;
     save(); renderSections();
     _scanWorkflow=null;
-    toast('Row complete: '+row.serialNumber+' / '+row.packer+' / '+row.ip,'success',3000);
-    closeBarcodeScanner();
+    _showScanFeedback('✓ IP: '+(nm||code)+' — Row complete!', '#4ade80', false);
+    setTimeout(function(){closeBarcodeScanner();toast('Row complete: '+row.serialNumber,'success',3000);},1200);
   }
+}
+
+function _showScanFeedback(message, color, keepOpen){
+  // Flash feedback overlay inside scanner
+  var overlay=document.getElementById('scannerOverlay');
+  if(!overlay) return;
+  var fb=document.getElementById('scanFeedback');
+  if(!fb){
+    fb=document.createElement('div');
+    fb.id='scanFeedback';
+    fb.style.cssText='position:absolute;bottom:70px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.85);border-radius:8px;padding:10px 20px;font-size:15px;font-weight:700;text-align:center;pointer-events:none;z-index:10;min-width:200px;';
+    overlay.querySelector('div').appendChild(fb);
+  }
+  fb.style.color=color;
+  fb.textContent=message;
+  fb.style.opacity='1';
+  setTimeout(function(){
+    if(fb) fb.style.opacity='0.3';
+  },1500);
 }
 
 function _codeToName(code){
@@ -10800,6 +10846,9 @@ function openBarcodeScanner(callback, stepLabel){
     +'</div>'
     +'<div id="scannerBox" style="width:100%;aspect-ratio:4/3;border-radius:10px;overflow:hidden;background:#000;position:relative;">'
     +'<video id="scannerVideo" style="width:100%;height:100%;object-fit:cover;" playsinline muted></video>'
+    // Red scan line that animates up and down
+    +'<div id="scanLine" style="position:absolute;left:5%;right:5%;height:2px;background:rgba(239,68,68,0.9);box-shadow:0 0 6px rgba(239,68,68,0.8);animation:scanline 1.8s ease-in-out infinite;top:50%;"></div>'
+    +'<style>@keyframes scanline{0%{top:20%}50%{top:80%}100%{top:20%}}</style>'
     +'<div style="position:absolute;inset:0;border:2px solid rgba(59,130,246,0.6);border-radius:10px;pointer-events:none;"></div>'
     +'</div>'
     +'<div style="text-align:center;margin-top:12px;">'
