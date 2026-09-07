@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v5.10.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v5.20.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -4377,6 +4377,7 @@ function openPrintPreview(title, bodyContent, archiveData){
       <span class="print-toolbar-title">${title}</span>
       <div class="print-toolbar-actions">
         <button class="btn btn-primary btn-sm" onclick="doPrint()">🖨 Print</button>
+        <button class="btn btn-secondary btn-sm" onclick="downloadPrintHTML('${title.replace(/'/g,"")}')" title="Download as HTML file — open in browser to print on mobile">⬇ Download</button>
         <button class="btn btn-secondary btn-sm" id="saveArchiveBtn" onclick="savePreviewToArchive()" style="display:none;">💾 Save to Archive</button>
         <button class="btn btn-secondary btn-sm" onclick="closePrintPreview()">✕ Close</button>
       </div>
@@ -4402,6 +4403,20 @@ function openPrintPreview(title, bodyContent, archiveData){
       fr.style.height=(h+40)+'px';
     }
   },200);
+}
+
+function downloadPrintHTML(title){
+  var frame=document.getElementById('printFrame');
+  if(!frame) return;
+  var html=frame.srcdoc||frame.contentDocument?.documentElement?.outerHTML||'';
+  if(!html){toast('Nothing to download','error');return;}
+  var blob=new Blob([html],{type:'text/html'});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=(title||'PMS-Print').replace(/[^a-zA-Z0-9-_ ]/g,'')+'.html';
+  a.click();
+  setTimeout(function(){URL.revokeObjectURL(a.href);},1000);
+  toast('Downloaded — open the file in your browser to print','success',4000);
 }
 
 function doPrint(){
@@ -5577,13 +5592,13 @@ function renderPSR(){
     <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Total On Hand</div>
     <div style="margin-bottom:10px;"><button onclick="syncCapacityToActual()" style="background:none;border:1px solid var(--accent);border-radius:4px;color:var(--accent);cursor:pointer;font-size:10px;padding:3px 10px;font-family:inherit;">⟳ Sync to Actual</button></div>
     <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
-      ${onHandBox('T-11',actualT11,capT11,"S.capacityT11=parseInt(this.value)||0;save();renderPSR();")}
-      ${onHandBox('T-11R',actualT11R,capT11R,"S.capacityT11R=parseInt(this.value)||0;save();renderPSR();")}
-      ${onHandBox('T-11R SP',actualT11RSP,capT11RSP,"S.capacityT11RSP=parseInt(this.value)||0;save();renderPSR();")}
-      ${onHandBox('MC-6',actualMC6,capMC6,"S.capacityMC6=parseInt(this.value)||0;save();renderPSR();")}
-      ${onHandBox('RA-1',actualRA1,capRA1,"S.capacityRA1=parseInt(this.value)||0;save();renderPSR();")}
-      ${onHandBox('RA-1R',actualRA1R,capRA1R,"S.capacityRA1R=parseInt(this.value)||0;save();renderPSR();")}
-      ${onHandBox('RA-1 DBSL',actualRA1DBSL,capRA1DBSL,"S.capacityRA1DBSL=parseInt(this.value)||0;save();renderPSR();")}
+      ${onHandBox('T-11',actualT11,capT11,"var old=S.capacityT11;S.capacityT11=parseInt(this.value)||0;auditLog('config','On Hand Updated','T-11 capacity: '+old+' → '+S.capacityT11);save();renderPSR();")}
+      ${onHandBox('T-11R',actualT11R,capT11R,"var old=S.capacityT11R;S.capacityT11R=parseInt(this.value)||0;auditLog('config','On Hand Updated','T-11R capacity: '+old+' → '+S.capacityT11R);save();renderPSR();")}
+      ${onHandBox('T-11R SP',actualT11RSP,capT11RSP,"var old=S.capacityT11RSP;S.capacityT11RSP=parseInt(this.value)||0;auditLog('config','On Hand Updated','T-11R SP capacity: '+old+' → '+S.capacityT11RSP);save();renderPSR();")}
+      ${onHandBox('MC-6',actualMC6,capMC6,"var old=S.capacityMC6;S.capacityMC6=parseInt(this.value)||0;auditLog('config','On Hand Updated','MC-6 capacity: '+old+' → '+S.capacityMC6);save();renderPSR();")}
+      ${onHandBox('RA-1',actualRA1,capRA1,"var old=S.capacityRA1;S.capacityRA1=parseInt(this.value)||0;auditLog('config','On Hand Updated','RA-1 capacity: '+old+' → '+S.capacityRA1);save();renderPSR();")}
+      ${onHandBox('RA-1R',actualRA1R,capRA1R,"var old=S.capacityRA1R;S.capacityRA1R=parseInt(this.value)||0;auditLog('config','On Hand Updated','RA-1R capacity: '+old+' → '+S.capacityRA1R);save();renderPSR();")}
+      ${onHandBox('RA-1 DBSL',actualRA1DBSL,capRA1DBSL,"var old=S.capacityRA1DBSL;S.capacityRA1DBSL=parseInt(this.value)||0;auditLog('config','On Hand Updated','RA-1 DBSL capacity: '+old+' → '+S.capacityRA1DBSL);save();renderPSR();")}
       ${customCaps.map(function(cc,ci){
         let ccAct=0; S.sections.forEach(function(s){if(s.systemType===cc.sys) ccAct+=countRealRows(s)+(parseInt(s.bulkCount)||0);});
         return `<div style="text-align:center;">
@@ -5911,16 +5926,20 @@ function undoDeleteSignOut(){
 function addAbnOp(){
   if(!S.abnOps) S.abnOps=[];
   S.abnOps.push({name:'',date:'',requested:''});
+  auditLog('ops','ABN Op Added','New operation added');
   save(); renderPSR();
 }
 function updAbnOp(idx,fld,val){
   if(!S.abnOps?.[idx]) return;
+  var old=S.abnOps[idx][fld];
   S.abnOps[idx][fld]=fld==='requested'?(parseInt(val)||''):val;
+  if(old!==S.abnOps[idx][fld]) auditLog('ops','ABN Op Updated',(S.abnOps[idx].name||'Op '+idx)+': '+fld+' changed to '+val);
   save(); renderPSR();
 }
 function delAbnOp(idx){
   if(!S.abnOps) return;
   var deleted=S.abnOps.splice(idx,1)[0];
+  auditLog('ops','ABN Op Deleted',(deleted.name||'Op '+idx)+' — '+( deleted.requested||0)+' chutes on '+(deleted.date||'no date'));
   save(); renderPSR();
   toast('ABN Op deleted. <button onclick="undoDelAbnOp()" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:4px;cursor:pointer;margin-left:6px;font-weight:600;">UNDO</button>','warning',10000);
   window._lastDeletedAbnOp=deleted;
@@ -9151,7 +9170,7 @@ function renderInventory(){
   html+='<div style="border:0.5px solid var(--border);border-radius:0 8px 8px 8px;padding:12px;background:var(--bg-card);">';
   html+='<table class="data-table"><thead><tr>';
   html+='<th style="width:32px;"><input type="checkbox" onchange="toggleAllInv(this.checked)"></th>';
-  html+='<th>Serial Number</th><th>DOM</th><th>PIS</th><th>OSD</th><th>Location</th><th style="width:80px;"></th>';
+  html+='<th>Serial Number</th><th>DOM</th><th>PIS</th><th>OSD</th><th>Location</th><th>System</th><th style="width:80px;"></th>';
   html+='</tr></thead><tbody>';
   sysSNs.forEach(function(sn){
     var item=inv[sn];
@@ -9161,15 +9180,19 @@ function renderInventory(){
         if(r.serialNumber===sn) location=sec.binLocation+' ('+sec.systemType+')';
       });
     });
+    var sysOpts=['T-11','T-11R','T-11R SP','MC-6','RA-1','RA-1R','RA-1 DBSL',''].map(function(s){
+      return '<option value="'+s+'"'+(s===(item.systemType||'')?'selected':'')+'>'+(s||'—')+'</option>';
+    }).join('');
     html+='<tr>';
     html+='<td><input type="checkbox" class="inv-cb" data-sn="'+esc(sn)+'"></td>';
     html+='<td style="font-weight:600;cursor:pointer;color:var(--accent);" onclick="showChuteHistory(\''+esc(sn)+'\')" title="Click for history">'+esc(sn)+'</td>';
-    html+='<td style="font-size:11px;">'+(item.dom||'\u2014')+'</td>';
-    html+='<td style="font-size:11px;">'+(item.pis||'\u2014')+'</td>';
-    html+='<td style="font-size:11px;">'+(item.osd||'\u2014')+'</td>';
+    html+='<td style="font-size:11px;">'+(item.dom||'—')+'</td>';
+    html+='<td style="font-size:11px;">'+(item.pis||'—')+'</td>';
+    html+='<td style="font-size:11px;">'+(item.osd||'—')+'</td>';
     html+='<td style="font-size:11px;color:var(--text-muted);">'+location+'</td>';
+    html+='<td><select onchange="updateInventorySystemType(\''+esc(sn)+'\',this.value)" style="background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:3px 6px;font-size:11px;outline:none;font-family:inherit;max-width:90px;">'+sysOpts+'</select></td>';
     html+='<td style="display:flex;gap:4px;">';
-    html+='<button class="row-action-btn" onclick="showSingleBarcode(\''+esc(sn)+'\')" title="Show barcode">\u{1F4F7}</button>';
+    html+='<button class="row-action-btn" onclick="showSingleBarcode(\''+esc(sn)+'\')" title="Show barcode">📷</button>';
     html+='<button class="row-action-btn delete" onclick="deleteInventoryItem(\''+esc(sn)+'\')">\u2715</button>';
     html+='</td>';
     html+='</tr>';
@@ -9212,6 +9235,18 @@ function printSingleBarcode(sn){
   body+='</div>';
   body+='<div class="footer">Parachute Management System — Barcode: '+esc(sn)+'</div>';
   openPrintPreview('Barcode: '+sn, body);
+}
+
+function updateInventorySystemType(sn, newSys){
+  if(!S.masterInventory[sn]) return;
+  var old=S.masterInventory[sn].systemType||'—';
+  S.masterInventory[sn].systemType=newSys;
+  auditLog('section','Inventory System Changed',sn+': '+old+' → '+(newSys||'—'));
+  save();
+  // Switch tab to show new system
+  if(newSys) localStorage.setItem('pms_inv_tab',newSys);
+  renderInventory();
+  toast(sn+' moved to '+( newSys||'—'),'success',2000);
 }
 
 function toggleAllInv(checked){document.querySelectorAll('.inv-cb').forEach(function(cb){cb.checked=checked;});}
@@ -9277,6 +9312,7 @@ function deleteInventoryItem(sn){
      {label:'Remove',cls:'btn-danger',fn:function(){
        var backup=JSON.parse(JSON.stringify(S.masterInventory[sn]||{}));
        delete S.masterInventory[sn];
+       auditLog('section','Inventory Deleted','Removed '+sn+' from master inventory');
        save();renderInventory();
        toast(sn+' removed','warning',8000,{label:'Undo',fn:function(){
          S.masterInventory[sn]=backup;save();renderInventory();toast('Restored','success');
@@ -10689,7 +10725,13 @@ function _handleGuidedScanResult(code){
   var row=sec.rows[rowIdx];
 
   if(step==='serial'){
-    // Validate system type — check if this serial exists in another system
+    // Reject if looks like commercial barcode (all digits, 8-13 chars = UPC/EAN)
+    if(/^\d{8,13}$/.test(code)){
+      _showScanFeedback('⚠ Looks like a product barcode — scan a chute serial number', '#f97316', false);
+      _lastScanTime=0; // allow retry immediately
+      return;
+    }
+    // Validate system type conflict
     var conflict=null;
     S.sections.forEach(function(s){
       if(s.id===secId) return;
@@ -10699,6 +10741,7 @@ function _handleGuidedScanResult(code){
     });
     if(conflict){
       _showScanFeedback('⚠ Already in '+conflict.bin+' ('+conflict.sys+')', '#f97316', false);
+      _lastScanTime=0;
       return;
     }
     row.serialNumber=code;
@@ -10708,6 +10751,13 @@ function _handleGuidedScanResult(code){
     _updateScanStepLabel('Scan Packer Name', code);
 
   } else if(step==='packer'){
+    // For name steps - accept PMS-NAME barcodes or user-typed names
+    // If it looks like a product barcode, warn
+    if(/^\d{8,13}$/.test(code)){
+      _showScanFeedback('⚠ Scan a name barcode or tap Cancel to type manually', '#f97316', false);
+      _lastScanTime=0;
+      return;
+    }
     var nm=_codeToName(code);
     row.packer=nm||code;
     save(); renderSections();
@@ -10716,6 +10766,11 @@ function _handleGuidedScanResult(code){
     _updateScanStepLabel('Scan IP Name', nm||code);
 
   } else if(step==='ip'){
+    if(/^\d{8,13}$/.test(code)){
+      _showScanFeedback('⚠ Scan a name barcode or tap Cancel to type manually', '#f97316', false);
+      _lastScanTime=0;
+      return;
+    }
     var nm=_codeToName(code);
     row.ip=nm||code;
     save(); renderSections();
@@ -10784,7 +10839,7 @@ function printNameBarcodes(){
     +userChecks
     +'</div>'
     +'<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">Temporary names (one per line — no account created):</div>'
-    +'<textarea id="tempNameInput" rows="3" placeholder="Johnson&#10;Martinez&#10;Kim" style="'+is+'resize:vertical;"></textarea>'
+    +'<textarea id="tempNameInput" rows="3" placeholder="One name per line..." style="'+is+'resize:vertical;"></textarea>'
     +'</div>',
     [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
      {label:'Print',cls:'btn-primary',fn:function(){
@@ -10847,8 +10902,7 @@ function openBarcodeScanner(callback, stepLabel){
     +'<div id="scannerBox" style="width:100%;aspect-ratio:4/3;border-radius:10px;overflow:hidden;background:#000;position:relative;">'
     +'<video id="scannerVideo" style="width:100%;height:100%;object-fit:cover;" playsinline muted></video>'
     // Red scan line that animates up and down
-    +'<div id="scanLine" style="position:absolute;left:5%;right:5%;height:2px;background:rgba(239,68,68,0.9);box-shadow:0 0 6px rgba(239,68,68,0.8);animation:scanline 1.8s ease-in-out infinite;top:50%;"></div>'
-    +'<style>@keyframes scanline{0%{top:20%}50%{top:80%}100%{top:20%}}</style>'
+    +'<div style="position:absolute;left:5%;right:5%;height:2px;background:rgba(239,68,68,0.9);box-shadow:0 0 8px rgba(239,68,68,0.8);top:50%;transform:translateY(-50%);pointer-events:none;"></div>'
     +'<div style="position:absolute;inset:0;border:2px solid rgba(59,130,246,0.6);border-radius:10px;pointer-events:none;"></div>'
     +'</div>'
     +'<div style="text-align:center;margin-top:12px;">'
