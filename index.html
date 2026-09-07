@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v5.20.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v5.30.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -8917,7 +8917,7 @@ function opsScanSignIn(signOutIdx){
   var expColor=daysLeft<=0?'var(--danger)':daysLeft<=7?'var(--warning-orange)':daysLeft<=30?'var(--warning)':'var(--success)';
   var binName=scannedRecord.bin+' ('+scannedRecord.system+')';
   
-  S._opsSignInLog.push({sn:sn,bin:binName,system:scannedRecord.system,expStatus:expStatus,expColor:expColor});
+  S._opsSignInLog.push({sn:sn,bin:binName,system:scannedRecord.system,expStatus:expStatus,expColor:expColor,scanInTime:new Date().toLocaleTimeString()});
   toast(sn+' \u2192 '+scannedRecord.bin+' ('+alreadyScanned+1+'/'+allowedLive+' '+sys+')'+(daysLeft<=30?' \u26A0 '+expStatus:''),'success',3000);
   opsRenderSignInLog(signOutIdx);
 }
@@ -8935,9 +8935,10 @@ function opsRenderSignInLog(signOutIdx){
   if(!S._opsSignInLog||S._opsSignInLog.length===0){logArea.innerHTML='';return;}
   var html='<div style="font-size:12px;font-weight:600;margin-top:8px;margin-bottom:4px;">Scanned In: '+S._opsSignInLog.length+'</div>';
   html+='<div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;">';
-  html+='<table class="data-table"><thead><tr><th>S/N</th><th>Return To</th><th>Exp</th><th></th></tr></thead><tbody>';
+  html+='<table class="data-table"><thead><tr><th>S/N</th><th>Return To</th><th>Exp</th><th>Time</th><th></th></tr></thead><tbody>';
   S._opsSignInLog.slice().reverse().forEach(function(e){
     html+='<tr><td style="font-weight:600;">'+esc(e.sn)+'</td><td>'+esc(e.bin)+'</td><td style="color:'+e.expColor+';">'+e.expStatus+'</td>';
+    html+='<td style="font-size:10px;color:var(--text-muted);">'+(e.scanInTime||'—')+'</td>';
     html+='<td style="width:30px;"><button style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:14px;" onclick="opsRemoveScannedIn('+signOutIdx+',\''+esc(e.sn)+'\')" title="Remove">\u2715</button></td></tr>';
   });
   html+='</tbody></table></div>';
@@ -10725,13 +10726,13 @@ function _handleGuidedScanResult(code){
   var row=sec.rows[rowIdx];
 
   if(step==='serial'){
-    // Reject if looks like commercial barcode (all digits, 8-13 chars = UPC/EAN)
+    // Reject commercial barcodes (all digits 8-13 = UPC/EAN)
     if(/^\d{8,13}$/.test(code)){
       _showScanFeedback('⚠ Looks like a product barcode — scan a chute serial number', '#f97316', false);
-      _lastScanTime=0; // allow retry immediately
+      _lastScanTime=0;
       return;
     }
-    // Validate system type conflict
+    // Check if serial already exists in another section
     var conflict=null;
     S.sections.forEach(function(s){
       if(s.id===secId) return;
@@ -10743,6 +10744,18 @@ function _handleGuidedScanResult(code){
       _showScanFeedback('⚠ Already in '+conflict.bin+' ('+conflict.sys+')', '#f97316', false);
       _lastScanTime=0;
       return;
+    }
+    // Cross-check system type against master inventory
+    var invItem=S.masterInventory&&S.masterInventory[code];
+    if(invItem&&invItem.systemType&&sec.systemType&&invItem.systemType!==sec.systemType){
+      // Wrong system — block and warn
+      _showScanFeedback('⚠ '+code+' is a '+invItem.systemType+' — this bin is '+sec.systemType, '#ef4444', false);
+      _lastScanTime=0;
+      return;
+    }
+    // If in inventory but system type unknown on section, warn but allow
+    if(invItem&&invItem.systemType&&!sec.systemType){
+      _showScanFeedback('⚠ '+code+' is a '+invItem.systemType+' — no system set on this bin', '#f97316', false);
     }
     row.serialNumber=code;
     save(); renderSections();
