@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v5.20.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v5.40.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -640,6 +640,7 @@
       <button class="btn btn-primary" style="font-size:10px;padding:3px 8px;margin-top:6px;margin-left:6px;" onclick="syncFromDB()">Sync From Database</button>
       <button class="btn btn-danger" style="font-size:10px;padding:3px 8px;margin-top:6px;margin-left:6px;" onclick="clearAllLocalData()">Clear All Local Data</button>
       <button class="btn btn-warning" style="font-size:10px;padding:3px 8px;margin-top:6px;margin-left:6px;background:var(--warning);color:#000;border:none;" onclick="resetBulkSignedOut()">Reset Stuck Sign-Out Counts</button>
+      <button class="btn btn-secondary" style="font-size:10px;padding:3px 8px;margin-top:6px;margin-left:6px;" onclick="openRestoreSnapshot()">⏪ Restore Snapshot</button>
       <button class="btn btn-secondary" style="font-size:10px;padding:3px 8px;margin-top:6px;margin-left:6px;" onclick="testDbMethods()">Test Connection</button>
     </div>
     <h3 style="font-size:14px;color:var(--text-secondary);margin-bottom:10px;">Audit Log</h3>
@@ -731,12 +732,17 @@ function load(){
   if(!S.abnOps) S.abnOps=[];
   if(!S.masterInventory) S.masterInventory={};
   if(!S.statusCounts) S.statusCounts={};
-  // Clean out empty entries (from old auto-populate behavior)
+  // Only clean out completely empty entries (no bin AND no count AND no meaningful data)
+  // Do NOT delete entries just because count is 0 — user may have intentionally set to 0
   Object.keys(S.statusCounts).forEach(function(sys){
     Object.keys(S.statusCounts[sys]).forEach(function(cat){
       var entries=S.statusCounts[sys][cat];
       if(Array.isArray(entries)){
-        S.statusCounts[sys][cat]=entries.filter(function(e){return e.bin||e.count;});
+        // Only remove entries that have absolutely nothing — no bin, no count, not even 0
+        S.statusCounts[sys][cat]=entries.filter(function(e){
+          return e.bin!==undefined||e.count!==undefined||e.count===0;
+        });
+        // Only remove the whole category if completely empty array
         if(S.statusCounts[sys][cat].length===0) delete S.statusCounts[sys][cat];
       }
     });
@@ -791,9 +797,28 @@ function load(){
 var _savingToDB=false;
 var _saveDebounce=null;
 var _localDirty=false;
+var _lastSnapshotTime=0;
+var _SNAPSHOT_INTERVAL=5*60*1000; // snapshot every 5 minutes
+var _SNAPSHOT_MAX=6; // keep last 6 = 30 minutes
+
+function takeSnapshot(){
+  try{
+    var now=Date.now();
+    var key='pms_snapshots_'+getActiveUnit();
+    var snapshots=JSON.parse(localStorage.getItem(key)||'[]');
+    snapshots.unshift({ts:now,label:new Date(now).toLocaleTimeString(),data:JSON.stringify(S)});
+    // Keep only last _SNAPSHOT_MAX
+    if(snapshots.length>_SNAPSHOT_MAX) snapshots=snapshots.slice(0,_SNAPSHOT_MAX);
+    localStorage.setItem(key,JSON.stringify(snapshots));
+    _lastSnapshotTime=now;
+  }catch(e){} // storage full etc — silently skip
+}
+
 function save(){ 
   _localDirty=true;
-  try{ localStorage.setItem(getStorageKey(),JSON.stringify(S)); }catch(e){} 
+  try{ localStorage.setItem(getStorageKey(),JSON.stringify(S)); }catch(e){}
+  // Auto-snapshot every 5 minutes
+  if(Date.now()-_lastSnapshotTime>_SNAPSHOT_INTERVAL) takeSnapshot();
   // Debounced async save to Supabase (non-blocking)
   if(dbReady && activeUnitId && !_savingToDB){
     clearTimeout(_saveDebounce);
@@ -802,6 +827,40 @@ function save(){
       saveToDB().then(function(){dbLog('DB saved');_savingToDB=false;_localDirty=false;}).catch(function(e){dbLog('Save ERROR: '+(e.message||''));_savingToDB=false;});
     }, 1000);
   }
+}
+
+function openRestoreSnapshot(){
+  var key='pms_snapshots_'+getActiveUnit();
+  var snapshots=JSON.parse(localStorage.getItem(key)||'[]');
+  if(snapshots.length===0){toast('No snapshots available yet','warning');return;}
+  var now=Date.now();
+  var is='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:8px;font-size:13px;font-family:inherit;outline:none;width:100%;';
+  var opts=snapshots.map(function(s,i){
+    var mins=Math.round((now-s.ts)/60000);
+    var label=mins===0?'Just now':mins+' minute'+(mins===1?'':'s')+' ago — '+s.label;
+    return '<option value="'+i+'">'+label+'</option>';
+  }).join('');
+  showConfirm('Restore Data Snapshot',
+    '<div style="text-align:left;">'
+    +'<div style="font-size:13px;color:var(--warning);margin-bottom:10px;">⚠ This will overwrite your current data with a saved snapshot. This cannot be undone.</div>'
+    +'<div style="font-size:12px;margin-bottom:6px;">Select how far back to restore:</div>'
+    +'<select id="snapshotSelect" style="'+is+'">'+opts+'</select>'
+    +'<div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Snapshots are taken every 5 minutes automatically.</div>'
+    +'</div>',
+    [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
+     {label:'Restore',cls:'btn-danger',fn:function(){
+       var idx=parseInt(document.getElementById('snapshotSelect').value)||0;
+       var snap=snapshots[idx];
+       if(!snap){toast('Snapshot not found','error');return;}
+       try{
+         S=JSON.parse(snap.data);
+         save();
+         renderStatusBar(); renderSections(); renderHome();
+         try{renderPSR();}catch(e){}
+         toast('Restored to '+snap.label,'success',4000);
+         auditLog('config','Data Restored','Restored snapshot from '+new Date(snap.ts).toLocaleTimeString());
+       }catch(e){toast('Restore failed: '+e.message,'error');}
+     }}]);
 }
 
 // Toast with optional action button (for undo)
@@ -8917,7 +8976,7 @@ function opsScanSignIn(signOutIdx){
   var expColor=daysLeft<=0?'var(--danger)':daysLeft<=7?'var(--warning-orange)':daysLeft<=30?'var(--warning)':'var(--success)';
   var binName=scannedRecord.bin+' ('+scannedRecord.system+')';
   
-  S._opsSignInLog.push({sn:sn,bin:binName,system:scannedRecord.system,expStatus:expStatus,expColor:expColor});
+  S._opsSignInLog.push({sn:sn,bin:binName,system:scannedRecord.system,expStatus:expStatus,expColor:expColor,scanInTime:new Date().toLocaleTimeString()});
   toast(sn+' \u2192 '+scannedRecord.bin+' ('+alreadyScanned+1+'/'+allowedLive+' '+sys+')'+(daysLeft<=30?' \u26A0 '+expStatus:''),'success',3000);
   opsRenderSignInLog(signOutIdx);
 }
@@ -8935,9 +8994,10 @@ function opsRenderSignInLog(signOutIdx){
   if(!S._opsSignInLog||S._opsSignInLog.length===0){logArea.innerHTML='';return;}
   var html='<div style="font-size:12px;font-weight:600;margin-top:8px;margin-bottom:4px;">Scanned In: '+S._opsSignInLog.length+'</div>';
   html+='<div style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;">';
-  html+='<table class="data-table"><thead><tr><th>S/N</th><th>Return To</th><th>Exp</th><th></th></tr></thead><tbody>';
+  html+='<table class="data-table"><thead><tr><th>S/N</th><th>Return To</th><th>Exp</th><th>Time</th><th></th></tr></thead><tbody>';
   S._opsSignInLog.slice().reverse().forEach(function(e){
     html+='<tr><td style="font-weight:600;">'+esc(e.sn)+'</td><td>'+esc(e.bin)+'</td><td style="color:'+e.expColor+';">'+e.expStatus+'</td>';
+    html+='<td style="font-size:10px;color:var(--text-muted);">'+(e.scanInTime||'—')+'</td>';
     html+='<td style="width:30px;"><button style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:14px;" onclick="opsRemoveScannedIn('+signOutIdx+',\''+esc(e.sn)+'\')" title="Remove">\u2715</button></td></tr>';
   });
   html+='</tbody></table></div>';
@@ -8992,15 +9052,33 @@ function opsProcessSignIn(signOutIdx){
   var scannedIn=(S._opsSignInLog||[]).length;
   var isMulti=document.getElementById('opsSignInMulti')&&document.getElementById('opsSignInMulti').value==='1';
   
-  // If all popped - no scanning needed
+  // If all popped - confirm first
   if(live===0){
-    doFinalProcessSignIn(signOutIdx,0,totalOut,0,isMulti);
+    showConfirm('Confirm Return — All Popped',
+      '<div style="text-align:center;padding:8px;">'
+      +'<div style="font-size:32px;margin-bottom:8px;">📦</div>'
+      +'<div style="font-size:15px;font-weight:600;">All '+totalOut+' chutes returned as POPPED?</div>'
+      +'<div style="font-size:12px;color:var(--text-muted);margin-top:6px;">They will be moved to the unpacked tracker.</div>'
+      +'</div>',
+      [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
+       {label:'Confirm — All Popped',cls:'btn-danger',fn:function(){
+         doFinalProcessSignIn(signOutIdx,0,totalOut,0,isMulti);
+       }}]);
     return;
   }
   
-  // If all live - no scanning needed (all come back)
+  // If all live - confirm first
   if(popped===0 && scannedIn===0){
-    doFinalProcessSignIn(signOutIdx,totalOut,0,0,isMulti);
+    showConfirm('Confirm Return — All Live',
+      '<div style="text-align:center;padding:8px;">'
+      +'<div style="font-size:32px;margin-bottom:8px;">✅</div>'
+      +'<div style="font-size:15px;font-weight:600;">All '+totalOut+' chutes returned LIVE?</div>'
+      +'<div style="font-size:12px;color:var(--text-muted);margin-top:6px;">They will be restored to their original bins.</div>'
+      +'</div>',
+      [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
+       {label:'Confirm — All Live',cls:'btn-primary',fn:function(){
+         doFinalProcessSignIn(signOutIdx,totalOut,0,0,isMulti);
+       }}]);
     return;
   }
   
@@ -10725,13 +10803,13 @@ function _handleGuidedScanResult(code){
   var row=sec.rows[rowIdx];
 
   if(step==='serial'){
-    // Reject if looks like commercial barcode (all digits, 8-13 chars = UPC/EAN)
+    // Reject commercial barcodes (all digits 8-13 = UPC/EAN)
     if(/^\d{8,13}$/.test(code)){
       _showScanFeedback('⚠ Looks like a product barcode — scan a chute serial number', '#f97316', false);
-      _lastScanTime=0; // allow retry immediately
+      _lastScanTime=0;
       return;
     }
-    // Validate system type conflict
+    // Check if serial already exists in another section
     var conflict=null;
     S.sections.forEach(function(s){
       if(s.id===secId) return;
@@ -10743,6 +10821,18 @@ function _handleGuidedScanResult(code){
       _showScanFeedback('⚠ Already in '+conflict.bin+' ('+conflict.sys+')', '#f97316', false);
       _lastScanTime=0;
       return;
+    }
+    // Cross-check system type against master inventory
+    var invItem=S.masterInventory&&S.masterInventory[code];
+    if(invItem&&invItem.systemType&&sec.systemType&&invItem.systemType!==sec.systemType){
+      // Wrong system — block and warn
+      _showScanFeedback('⚠ '+code+' is a '+invItem.systemType+' — this bin is '+sec.systemType, '#ef4444', false);
+      _lastScanTime=0;
+      return;
+    }
+    // If in inventory but system type unknown on section, warn but allow
+    if(invItem&&invItem.systemType&&!sec.systemType){
+      _showScanFeedback('⚠ '+code+' is a '+invItem.systemType+' — no system set on this bin', '#f97316', false);
     }
     row.serialNumber=code;
     save(); renderSections();
