@@ -398,7 +398,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v5.40.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v5.60.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -798,27 +798,28 @@ var _savingToDB=false;
 var _saveDebounce=null;
 var _localDirty=false;
 var _lastSnapshotTime=0;
-var _SNAPSHOT_INTERVAL=5*60*1000; // snapshot every 5 minutes
-var _SNAPSHOT_MAX=6; // keep last 6 = 30 minutes
+var _SNAPSHOT_INTERVAL=30*60*1000; // auto-snapshot every 30 minutes silently
+var _SNAPSHOT_MAX=48; // keep last 48 = 24 hours of snapshots
 
-function takeSnapshot(){
+function autoSaveSnapshot(){
   try{
     var now=Date.now();
-    var key='pms_snapshots_'+getActiveUnit();
-    var snapshots=JSON.parse(localStorage.getItem(key)||'[]');
-    snapshots.unshift({ts:now,label:new Date(now).toLocaleTimeString(),data:JSON.stringify(S)});
-    // Keep only last _SNAPSHOT_MAX
-    if(snapshots.length>_SNAPSHOT_MAX) snapshots=snapshots.slice(0,_SNAPSHOT_MAX);
-    localStorage.setItem(key,JSON.stringify(snapshots));
+    if(now-_lastSnapshotTime<_SNAPSHOT_INTERVAL) return;
+    var key='pms_datasnaps_'+getActiveUnit();
+    var snaps=[];
+    try{snaps=JSON.parse(localStorage.getItem(key)||'[]');}catch(e){}
+    snaps.unshift({ts:now,label:new Date(now).toLocaleTimeString(),data:JSON.stringify(S)});
+    if(snaps.length>_SNAPSHOT_MAX) snaps=snaps.slice(0,_SNAPSHOT_MAX);
+    localStorage.setItem(key,JSON.stringify(snaps));
     _lastSnapshotTime=now;
-  }catch(e){} // storage full etc — silently skip
+  }catch(e){} // storage full — silently skip
 }
 
 function save(){ 
   _localDirty=true;
   try{ localStorage.setItem(getStorageKey(),JSON.stringify(S)); }catch(e){}
-  // Auto-snapshot every 5 minutes
-  if(Date.now()-_lastSnapshotTime>_SNAPSHOT_INTERVAL) takeSnapshot();
+  // Auto-snapshot every 30 minutes silently
+  autoSaveSnapshot();
   // Debounced async save to Supabase (non-blocking)
   if(dbReady && activeUnitId && !_savingToDB){
     clearTimeout(_saveDebounce);
@@ -830,35 +831,59 @@ function save(){
 }
 
 function openRestoreSnapshot(){
-  var key='pms_snapshots_'+getActiveUnit();
-  var snapshots=JSON.parse(localStorage.getItem(key)||'[]');
-  if(snapshots.length===0){toast('No snapshots available yet','warning');return;}
+  var key='pms_datasnaps_'+getActiveUnit();
+  var snaps=[];
+  try{snaps=JSON.parse(localStorage.getItem(key)||'[]');}catch(e){}
+  if(snaps.length===0){toast('No snapshots available yet — they save automatically every 30 minutes','warning');return;}
   var now=Date.now();
-  var is='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:8px;font-size:13px;font-family:inherit;outline:none;width:100%;';
-  var opts=snapshots.map(function(s,i){
-    var mins=Math.round((now-s.ts)/60000);
-    var label=mins===0?'Just now':mins+' minute'+(mins===1?'':'s')+' ago — '+s.label;
-    return '<option value="'+i+'">'+label+'</option>';
+
+  // Group into time buckets for easy selection
+  var buckets=[
+    {label:'Last 30 minutes', max:30*60*1000},
+    {label:'Last 2 hours',    max:2*60*60*1000},
+    {label:'Last 6 hours',    max:6*60*60*1000},
+    {label:'Last 12 hours',   max:12*60*60*1000},
+    {label:'Last 24 hours',   max:24*60*60*1000}
+  ];
+
+  // Build snapshot options
+  var opts=snaps.map(function(s,i){
+    var age=now-s.ts;
+    var mins=Math.round(age/60000);
+    var label='';
+    if(mins<60) label=mins+' min ago';
+    else if(mins<120) label='~1 hr ago';
+    else label=Math.round(mins/60)+' hrs ago';
+    var d=new Date(s.ts);
+    return '<option value="'+i+'">'+label+' — '+d.toLocaleDateString()+' '+d.toLocaleTimeString()+'</option>';
   }).join('');
-  showConfirm('Restore Data Snapshot',
+
+  var is='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:8px;font-size:13px;font-family:inherit;outline:none;width:100%;';
+  showConfirm('⏪ Restore Data Snapshot',
     '<div style="text-align:left;">'
-    +'<div style="font-size:13px;color:var(--warning);margin-bottom:10px;">⚠ This will overwrite your current data with a saved snapshot. This cannot be undone.</div>'
-    +'<div style="font-size:12px;margin-bottom:6px;">Select how far back to restore:</div>'
-    +'<select id="snapshotSelect" style="'+is+'">'+opts+'</select>'
-    +'<div style="font-size:11px;color:var(--text-muted);margin-top:6px;">Snapshots are taken every 5 minutes automatically.</div>'
+    +'<div style="background:rgba(239,68,68,0.1);border:1px solid var(--danger);border-radius:6px;padding:10px;margin-bottom:12px;font-size:12px;color:var(--danger);">'
+    +'⚠ This will replace your current data with a saved version. Your current data will be lost unless you push it to the database first.'
+    +'</div>'
+    +'<div style="font-size:12px;margin-bottom:6px;color:var(--text-muted);">Select a restore point:</div>'
+    +'<select id="snapSelect" style="'+is+'">'+opts+'</select>'
+    +'<div style="font-size:11px;color:var(--text-muted);margin-top:6px;">'+snaps.length+' snapshots available (up to 24 hours)</div>'
     +'</div>',
     [{label:'Cancel',cls:'btn-secondary',fn:function(){}},
      {label:'Restore',cls:'btn-danger',fn:function(){
-       var idx=parseInt(document.getElementById('snapshotSelect').value)||0;
-       var snap=snapshots[idx];
+       var idx=parseInt(document.getElementById('snapSelect').value)||0;
+       var snap=snaps[idx];
        if(!snap){toast('Snapshot not found','error');return;}
        try{
-         S=JSON.parse(snap.data);
+         var restored=JSON.parse(snap.data);
+         Object.assign(S,restored);
          save();
-         renderStatusBar(); renderSections(); renderHome();
+         try{renderStatusBar();}catch(e){}
+         try{renderSections();}catch(e){}
+         try{renderHome();}catch(e){}
          try{renderPSR();}catch(e){}
-         toast('Restored to '+snap.label,'success',4000);
-         auditLog('config','Data Restored','Restored snapshot from '+new Date(snap.ts).toLocaleTimeString());
+         var d=new Date(snap.ts);
+         toast('Restored to '+d.toLocaleTimeString()+' '+d.toLocaleDateString(),'success',4000);
+         auditLog('config','Data Restored','Restored snapshot from '+d.toLocaleTimeString());
        }catch(e){toast('Restore failed: '+e.message,'error');}
      }}]);
 }
@@ -5830,14 +5855,8 @@ function takeSnapshot(){
   if(!S.monthlySnapshots) S.monthlySnapshots=[];
   const now=new Date();
   const label=getMonthLabel(now);
-  if(S.monthlySnapshots.find(s=>s.label===label)){
-    showConfirm('Snapshot Exists',`A snapshot for <strong>${label}</strong> already exists. Replace it?`,
-      [{label:'Cancel',cls:'btn-secondary',fn:()=>{}},{label:'Replace',cls:'btn-danger',fn:()=>{
-        S.monthlySnapshots=S.monthlySnapshots.filter(s=>s.label!==label);
-        createSnapshot(label); save(); renderPSR(); toast('📸 Snapshot replaced');
-      }}]);
-    return;
-  }
+  // Silently replace existing snapshot — no popup
+  S.monthlySnapshots=S.monthlySnapshots.filter(s=>s.label!==label);
   createSnapshot(label); save(); renderPSR(); toast('📸 Snapshot saved for '+label);
 }
 
@@ -8063,84 +8082,100 @@ function fillFromRequest(ridx){
 
 
 // ═══ MODE: BULK ISSUE ═══
+var _bulkActiveTab='';
+
 function renderOpsBulk(el){
   var html='<div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:20px;">';
-  html+='<h3 style="font-size:15px;margin-bottom:8px;">Bulk Issue Mode</h3>';
-  html+='<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">Sign out chutes by quantity from bulk-count sections (no serial numbers needed).</div>';
-  
-  // Collect sections with bulk count available
-  var bulkSections=[];
-  S.sections.forEach(function(sec){
-    var bulkTotal=parseInt(sec.bulkCount)||0;
-    var bulkUsed=parseInt(sec._bulkSignedOut)||0;
-    var bulkAvail=bulkTotal-bulkUsed;
-    if(bulkAvail>0){
-      bulkSections.push({id:sec.id,bin:sec.binLocation,sys:sec.systemType,total:bulkTotal,used:bulkUsed,avail:bulkAvail,packDate:sec.bulkPackDate||''});
-    }
-  });
-  
-  if(bulkSections.length===0){
-    html+='<div style="color:var(--text-muted);font-size:13px;padding:20px 0;text-align:center;">No bulk-count sections with available chutes.<br>Use Set Count in RPR to add bulk chutes to a section.</div>';
-    html+='</div>';
-    el.innerHTML=html;
-    return;
-  }
-  
+  html+='<h3 style="font-size:15px;margin-bottom:4px;">Bulk Issue Mode</h3>';
+  html+='<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">Sign out chutes by quantity — no serial numbers needed.</div>';
+
   // Unit and date
   html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">';
   html+='<div class="form-group"><label class="form-label">Unit</label><input type="text" class="form-input" id="bulkIssueUnit" placeholder="Unit name" value="'+(window._bulkIssueUnit||'')+'"></div>';
   html+='<div class="form-group"><label class="form-label">Date</label><input type="date" class="form-input" id="bulkIssueDate" value="'+(window._bulkIssueDate||new Date().toISOString().split('T')[0])+'"></div>';
   html+='</div>';
-  
-  // Available bulk sections
-  html+='<div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--accent);">Available Bulk Sections</div>';
-  
-  bulkSections.forEach(function(bs, idx){
-    html+='<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:12px;align-items:center;padding:10px;margin-bottom:8px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;">';
-    html+='<div><span style="font-weight:600;color:var(--text-primary);">'+esc(bs.bin)+'</span><br><span style="font-size:10px;color:var(--text-muted);">'+esc(bs.sys)+'</span></div>';
-    html+='<div style="font-size:11px;color:var(--text-muted);">Available: <strong style="color:var(--text-primary);">'+bs.avail+'</strong> / '+bs.total+(bs.packDate?' | Packed: '+bs.packDate:'')+'</div>';
-    html+='<div><input type="number" id="bulkIssueQty-'+bs.id+'" min="0" max="'+bs.avail+'" placeholder="Qty" style="width:70px;font-size:13px;text-align:center;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:6px;outline:none;"></div>';
-    html+='<div style="font-size:10px;color:var(--text-muted);">of '+bs.avail+'</div>';
+
+  // Group bulk sections and popped by system type
+  var groups={};
+  var groupOrder=[];
+  function addGroup(sys){if(!groups[sys]){groups[sys]={bulk:[],popped:[]};groupOrder.push(sys);}}
+
+  S.sections.forEach(function(sec){
+    var avail=Math.max(0,(parseInt(sec.bulkCount)||0)-(parseInt(sec._bulkSignedOut)||0));
+    if(avail>0){
+      addGroup(sec.systemType);
+      groups[sec.systemType].bulk.push({id:sec.id,bin:sec.binLocation,sys:sec.systemType,avail:avail,total:parseInt(sec.bulkCount)||0,packDate:sec.bulkPackDate||''});
+    }
+  });
+
+  // Add popped/unpacked from tracker
+  Object.keys(S.statusCounts||{}).forEach(function(sys){
+    (S.statusCounts[sys].popped||[]).forEach(function(e){
+      var cnt=parseInt(e.count)||0;
+      if(cnt>0){
+        addGroup(sys);
+        groups[sys].popped.push({sys:sys,bin:e.bin||'Tracker',count:cnt,trackerIdx:S.statusCounts[sys].popped.indexOf(e)});
+      }
+    });
+  });
+
+  if(groupOrder.length===0){
+    html+='<div style="color:var(--text-muted);font-size:13px;padding:20px;text-align:center;">No bulk sections or unpacked chutes available.</div>';
+    html+='</div>';
+    el.innerHTML=html;
+    return;
+  }
+
+  // Set active tab
+  if(!_bulkActiveTab||!groups[_bulkActiveTab]) _bulkActiveTab=groupOrder[0];
+
+  // Tabs
+  html+='<div style="display:flex;flex-wrap:wrap;gap:0;margin-bottom:-1px;position:relative;z-index:1;">';
+  groupOrder.forEach(function(sys){
+    var isActive=sys===_bulkActiveTab;
+    var totalAvail=groups[sys].bulk.reduce(function(a,b){return a+b.avail;},0)
+                  +groups[sys].popped.reduce(function(a,b){return a+b.count;},0);
+    html+='<div onclick="switchBulkTab(\''+esc(sys)+'\')" style="padding:8px 14px;font-size:12px;border:0.5px solid var(--border);border-bottom:'+(isActive?'0.5px solid var(--bg-secondary)':'0.5px solid var(--border)')+';border-radius:8px 8px 0 0;cursor:pointer;margin-right:2px;background:'+(isActive?'var(--bg-secondary)':'var(--bg-card)')+';color:'+(isActive?'var(--accent)':'var(--text-muted)')+';">';
+    html+=esc(sys)+' <span style="font-size:10px;padding:1px 5px;border-radius:8px;background:var(--accent-dim);color:var(--accent);">'+totalAvail+'</span>';
     html+='</div>';
   });
-  
+  html+='</div>';
+
+  // Tab content
+  var grp=groups[_bulkActiveTab];
+  html+='<div style="border:0.5px solid var(--border);border-radius:0 8px 8px 8px;padding:16px;background:var(--bg-card);">';
+
+  // RFI bulk sections
+  if(grp.bulk.length>0){
+    html+='<div style="font-size:11px;font-weight:600;color:var(--success);margin-bottom:8px;">✅ RFI (Packed)</div>';
+    grp.bulk.forEach(function(bs){
+      html+='<div style="display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;padding:10px;margin-bottom:6px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;">';
+      html+='<div><span style="font-weight:600;">'+esc(bs.bin)+'</span><span style="font-size:10px;color:var(--text-muted);margin-left:6px;">'+bs.avail+' avail'+(bs.packDate?' · '+bs.packDate:'')+'</span></div>';
+      html+='<input type="number" id="bulkIssueQty-'+bs.id+'" min="0" max="'+bs.avail+'" placeholder="Qty" style="width:70px;font-size:13px;text-align:center;background:var(--bg-secondary);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:6px;outline:none;">';
+      html+='<span style="font-size:10px;color:var(--text-muted);">/ '+bs.avail+'</span>';
+      html+='</div>';
+    });
+  }
+
+  // Popped/unpacked sections
+  if(grp.popped.length>0){
+    html+='<div style="font-size:11px;font-weight:600;color:var(--warning);margin-bottom:8px;margin-top:'+(grp.bulk.length>0?'12px':'0')+';">📦 Unpacked</div>';
+    grp.popped.forEach(function(po){
+      var uid='bulkPopped-'+esc(po.sys).replace(/[^a-z0-9]/gi,'_')+'-'+po.trackerIdx;
+      html+='<div style="display:grid;grid-template-columns:1fr auto auto;gap:12px;align-items:center;padding:10px;margin-bottom:6px;background:var(--bg-input);border:1px solid var(--warning);border-radius:6px;">';
+      html+='<div><span style="font-weight:600;">'+esc(po.bin)+'</span><span style="font-size:10px;color:var(--warning);margin-left:6px;">'+po.count+' unpacked</span></div>';
+      html+='<input type="number" id="'+uid+'" data-sys="'+esc(po.sys)+'" data-idx="'+po.trackerIdx+'" min="0" max="'+po.count+'" placeholder="Qty" style="width:70px;font-size:13px;text-align:center;background:var(--bg-secondary);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:6px;outline:none;">';
+      html+='<span style="font-size:10px;color:var(--text-muted);">/ '+po.count+'</span>';
+      html+='</div>';
+    });
+  }
+
+  html+='</div>';
   html+='<div style="margin-top:16px;display:flex;gap:10px;justify-content:center;">';
   html+='<button class="btn btn-secondary" onclick="printBulkLoadPlan()">🖨 Print Load Plan</button>';
   html+='<button class="btn btn-primary" onclick="executeBulkIssue()">Sign Out Bulk Chutes</button>';
   html+='</div>';
   html+='</div>';
-
-  // Popped chutes sign-out section
-  var poppedAvail=[];
-  STATUS_SYS.forEach(function(sys){
-    (S.statusCounts[sys]?.popped||[]).forEach(function(e,ei){
-      var cnt=parseInt(e.count)||0;
-      if(cnt>0) poppedAvail.push({sys:sys,bin:e.bin||sys,count:cnt,sysKey:sys,entryIdx:ei});
-    });
-  });
-  html+='<div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:20px;margin-top:16px;">';
-  html+='<h3 style="font-size:15px;margin-bottom:4px;">Popped Chutes Issue</h3>';
-  html+='<div style="font-size:12px;color:var(--text-muted);margin-bottom:16px;">Sign out popped chutes for repair or turn-in.</div>';
-  if(poppedAvail.length===0){
-    html+='<div style="color:var(--text-muted);font-size:13px;text-align:center;padding:12px 0;">No popped chutes currently tracked.</div>';
-  } else {
-    html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">';
-    html+='<div class="form-group"><label class="form-label">Unit / Destination</label><input type="text" class="form-input" id="poppedIssueUnit" placeholder="Unit or repair facility" value="'+(window._poppedIssueUnit||'')+'"></div>';
-    html+='<div class="form-group"><label class="form-label">Date</label><input type="date" class="form-input" id="poppedIssueDate" value="'+(window._poppedIssueDate||new Date().toISOString().split('T')[0])+'"></div>';
-    html+='</div>';
-    html+='<div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--accent);">Available Popped Chutes</div>';
-    poppedAvail.forEach(function(p){
-      html+='<div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:12px;align-items:center;padding:10px;margin-bottom:8px;background:var(--bg-card);border:1px solid var(--border);border-radius:8px;">';
-      html+='<div><span style="font-weight:600;color:var(--warning);">'+esc(p.bin)+'</span><br><span style="font-size:10px;color:var(--text-muted);">'+esc(p.sys)+'</span></div>';
-      html+='<div style="font-size:11px;color:var(--text-muted);">Available: <strong style="color:var(--warning);">'+p.count+'</strong></div>';
-      html+='<div><input type="number" id="poppedIssueQty-'+p.sys+'-'+p.entryIdx+'" min="0" max="'+p.count+'" placeholder="Qty" style="width:70px;font-size:13px;text-align:center;background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:6px;outline:none;"></div>';
-      html+='<div style="font-size:10px;color:var(--text-muted);">of '+p.count+'</div>';
-      html+='</div>';
-    });
-    html+='<div style="margin-top:12px;text-align:center;"><button class="btn btn-warning" onclick="executePoppedIssue()" style="background:var(--warning);color:#000;border:none;">Sign Out Popped Chutes</button></div>';
-  }
-  html+='</div>';
-  
   // Active bulk sign-outs
   var bulkSOs=(S.signedOut||[]).filter(function(so){return so._isBulk&&so.status==='out';});
   if(bulkSOs.length>0){
@@ -8150,9 +8185,8 @@ function renderOpsBulk(el){
       var soIdx=S.signedOut.indexOf(so);
       html+='<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;margin-bottom:4px;background:var(--bg-card);border-radius:6px;">';
       html+='<div><strong>'+esc(so.unit||'')+'</strong> | '+esc(so.system||'')+' | '+esc(so.date||'')+'</div>';
-      html+='<div style="display:flex;gap:6px;">';
       html+='<button class="btn btn-secondary btn-sm" onclick="returnBulkIssue('+soIdx+')">Return</button>';
-      html+='</div></div>';
+      html+='</div>';
     });
     html+='</div>';
   }
@@ -8173,6 +8207,12 @@ function renderOpsBulk(el){
   }
 
   el.innerHTML=html;
+}
+
+function switchBulkTab(sys){
+  _bulkActiveTab=sys;
+  var el=document.getElementById('opsContent');
+  if(el) renderOpsBulk(el);
 }
 
 function printBulkLoadPlan(){
