@@ -399,7 +399,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v6.00.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v6.10.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -6087,8 +6087,8 @@ function undoDeleteSignOut(){
 
 function addAbnOp(){
   if(!S.abnOps) S.abnOps=[];
-  // New format: each op has name, date, sortOrder, and items:[{system,requested}]
-  S.abnOps.push({name:'',date:'',sortOrder:S.abnOps.length,items:[{system:'',requested:''}]});
+  // New format: each op has name, dz, date, and items:[{system,requested}]
+  S.abnOps.unshift({name:'',dz:'',date:'',items:[{system:'',requested:''}]});
   auditLog('ops','ABN Op Added','New operation added');
   save(); renderABNPlanner();
 }
@@ -6258,7 +6258,7 @@ function renderABNPlanner(){
     <div class="psr-section-title">✈️ Airborne Operations (ABN Op) <button class="btn btn-sm btn-secondary" onclick="addAbnOp()" style="margin-left:8px;">+ Add Op</button></div>`;
 
   if(sortedOps.length>0){
-    html+=`<table class="psr-table" style="margin-bottom:16px;"><thead><tr><th style="min-width:140px;max-width:220px;">Operation</th><th>System</th><th style="width:130px;">Date</th><th style="width:90px;">Requested</th><th style="width:40px;"></th></tr></thead><tbody>`;
+    html+=`<table class="psr-table" style="margin-bottom:16px;"><thead><tr><th style="min-width:140px;max-width:220px;">Operation</th><th style="width:110px;">DZ</th><th>System</th><th style="width:130px;">Date</th><th style="width:90px;">Requested</th><th style="width:40px;"></th></tr></thead><tbody>`;
     sortedOps.forEach(function(entry){
       var op=entry.op, i=entry.i;
       var items=op.items||[];
@@ -6270,6 +6270,9 @@ function renderABNPlanner(){
         if(isFirst){
           html+=`<td style="max-width:220px;" rowspan="${items.length}">
             <input type="text" value="${esc(op.name)}" placeholder="Op name" onchange="updAbnOp(${i},'name',this.value)" style="${is2}max-width:200px;">
+          </td>
+          <td style="width:110px;" rowspan="${items.length}">
+            <input type="text" value="${esc(op.dz||'')}" placeholder="DZ" onchange="updAbnOp(${i},'dz',this.value)" style="${is2}max-width:100px;">
           </td>`;
         }
         html+=`<td style="width:110px;"><select onchange="updAbnOpItem(${i},${j},'system',this.value)" style="${is2}">${sysOpts}</select></td>`;
@@ -6290,7 +6293,7 @@ function renderABNPlanner(){
         html+=`</tr>`;
       });
     });
-    html+=`<tr style="border-top:2px solid var(--border);"><td><strong>TOTAL</strong></td><td></td><td></td><td><strong>${totalRequested}</strong></td><td></td></tr>`;
+    html+=`<tr style="border-top:2px solid var(--border);"><td><strong>TOTAL</strong></td><td></td><td></td><td></td><td><strong>${totalRequested}</strong></td><td></td></tr>`;
     html+=`</tbody></table>`;
   } else {
     html+=`<div style="color:var(--text-muted);font-size:12px;padding:8px 0 16px;">No operations scheduled. Click + Add Op to track.</div>`;
