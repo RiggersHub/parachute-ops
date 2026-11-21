@@ -139,6 +139,7 @@
   .badge-t11r { background: rgba(168,85,247,0.2); color: #c084fc; }
   .badge-ra1 { background: rgba(251,191,36,0.2); color: #fbbf24; }
   .section-title { font-size: 14px; font-weight: 600; }
+  .bin-exp-badge { font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 4px; white-space: nowrap; background: rgba(0,0,0,0.15); }
   .section-meta { font-size: 12px; color: var(--text-muted); }
   .section-date-info { font-size: 11px; color: var(--text-secondary); margin-left: 8px; padding-left: 8px; border-left: 1px solid var(--border); }
   .section-date-info strong { font-weight: 600; }
@@ -398,7 +399,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v5.60.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v5.90.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -640,6 +641,7 @@
       <button class="btn btn-primary" style="font-size:10px;padding:3px 8px;margin-top:6px;margin-left:6px;" onclick="syncFromDB()">Sync From Database</button>
       <button class="btn btn-danger" style="font-size:10px;padding:3px 8px;margin-top:6px;margin-left:6px;" onclick="clearAllLocalData()">Clear All Local Data</button>
       <button class="btn btn-warning" style="font-size:10px;padding:3px 8px;margin-top:6px;margin-left:6px;background:var(--warning);color:#000;border:none;" onclick="resetBulkSignedOut()">Reset Stuck Sign-Out Counts</button>
+      <button class="btn btn-secondary" style="font-size:10px;padding:3px 8px;margin-top:6px;margin-left:6px;" onclick="manualSnapshot()">📸 Save Snapshot Now</button>
       <button class="btn btn-secondary" style="font-size:10px;padding:3px 8px;margin-top:6px;margin-left:6px;" onclick="openRestoreSnapshot()">⏪ Restore Snapshot</button>
       <button class="btn btn-secondary" style="font-size:10px;padding:3px 8px;margin-top:6px;margin-left:6px;" onclick="testDbMethods()">Test Connection</button>
     </div>
@@ -798,8 +800,8 @@ var _savingToDB=false;
 var _saveDebounce=null;
 var _localDirty=false;
 var _lastSnapshotTime=0;
-var _SNAPSHOT_INTERVAL=30*60*1000; // auto-snapshot every 30 minutes silently
-var _SNAPSHOT_MAX=48; // keep last 48 = 24 hours of snapshots
+var _SNAPSHOT_INTERVAL=120*60*1000; // auto-snapshot every 2 hours silently
+var _SNAPSHOT_MAX=24; // keep last 24 = 48 hours of snapshots at 2hr intervals
 
 function autoSaveSnapshot(){
   try{
@@ -808,17 +810,33 @@ function autoSaveSnapshot(){
     var key='pms_datasnaps_'+getActiveUnit();
     var snaps=[];
     try{snaps=JSON.parse(localStorage.getItem(key)||'[]');}catch(e){}
-    snaps.unshift({ts:now,label:new Date(now).toLocaleTimeString(),data:JSON.stringify(S)});
+    var _d=new Date(now); snaps.unshift({ts:now,label:_d.toLocaleDateString()+' '+_d.toLocaleTimeString(),data:JSON.stringify(S)});
     if(snaps.length>_SNAPSHOT_MAX) snaps=snaps.slice(0,_SNAPSHOT_MAX);
     localStorage.setItem(key,JSON.stringify(snaps));
     _lastSnapshotTime=now;
   }catch(e){} // storage full — silently skip
 }
 
-function save(){ 
+function manualSnapshot(){
+  try{
+    var now=Date.now();
+    var key='pms_datasnaps_'+getActiveUnit();
+    var snaps=[];
+    try{snaps=JSON.parse(localStorage.getItem(key)||'[]');}catch(e){}
+    var _d=new Date(now);
+    var label='📌 '+_d.toLocaleDateString()+' '+_d.toLocaleTimeString();
+    snaps.unshift({ts:now,label:label,data:JSON.stringify(S),manual:true});
+    if(snaps.length>_SNAPSHOT_MAX) snaps=snaps.slice(0,_SNAPSHOT_MAX);
+    localStorage.setItem(key,JSON.stringify(snaps));
+    _lastSnapshotTime=now;
+    toast('Snapshot saved — '+label,'success',3000);
+  }catch(e){toast('Snapshot failed: '+e.message,'error');}
+}
+
+function save(){
   _localDirty=true;
   try{ localStorage.setItem(getStorageKey(),JSON.stringify(S)); }catch(e){}
-  // Auto-snapshot every 30 minutes silently
+  // Auto-snapshot every 2 hours silently
   autoSaveSnapshot();
   // Debounced async save to Supabase (non-blocking)
   if(dbReady && activeUnitId && !_savingToDB){
@@ -3347,8 +3365,48 @@ function switchRPRTab(sys){
   renderSections();
 }
 
+function addSection(sys){
+  // Opens the Add Section modal pre-filled with the given system type
+  populateSystemDropdown();
+  binSel.innerHTML='<option value="">Select bin...</option>';
+  S.binLocations.forEach(b=>{ binSel.innerHTML+=`<option value="${b}">${b}</option>`; });
+  newBinIn.style.display='none'; newBinIn.value=''; numIn.value='';
+  if(sys && sysSel){ sysSel.value=sys; if(CFG[sys]){numIn.value=CFG[sys].maxBin;} hint.textContent='Auto-filled from tab: '+sys; }
+  else { sysSel.value=''; hint.textContent='Select a system type to auto-fill'; }
+  addModal.classList.add('active');
+}
+
 
 function badge(t){ if(t.startsWith('MC'))return'badge-mc6'; if(t==='T-11')return'badge-t11'; if(t.startsWith('T-11R'))return'badge-t11r'; if(t.startsWith('RA'))return'badge-ra1'; return''; }
+
+function editBinNumber(secId){
+  const sec=S.sections.find(s=>s.id===secId); if(!sec) return;
+  const oldBin=sec.binLocation;
+  showConfirm('Edit Bin Number',
+    `<div style="margin-bottom:10px;">Current bin: <strong>${esc(oldBin)}</strong></div>`+
+    `<div class="form-group"><label class="form-label">New bin number (type or scan)</label>`+
+    `<input type="text" id="_editBinInput" class="form-input" value="${esc(oldBin)}" style="margin-bottom:6px;">`+
+    `<button class="btn btn-secondary btn-sm" onclick="openBarcodeScanner(function(code){document.getElementById('_editBinInput').value=code;})" style="width:100%;">📷 Scan Barcode</button></div>`,
+    [{label:'Cancel',cls:'btn-secondary',fn:()=>{}},{label:'Save',cls:'btn-primary',fn:()=>{
+      const newBin=(document.getElementById('_editBinInput')||{}).value||'';
+      if(!newBin.trim()){toast('Bin number cannot be empty','warning');return;}
+      if(newBin.trim()===oldBin){return;}
+      const oldName=oldBin;
+      sec.binLocation=newBin.trim();
+      // Update binLocations list
+      if(!S.binLocations.includes(newBin.trim())) S.binLocations.push(newBin.trim());
+      // Remove old if no other section uses it
+      if(!S.sections.find(s=>s.id!==secId&&s.binLocation===oldName)){
+        S.binLocations=S.binLocations.filter(b=>b!==oldName);
+      }
+      auditLog('rpr','Renamed bin '+oldName+' → '+newBin.trim()+' ('+sec.systemType+')');
+      save(); updateBinDL(); renderSections();
+      toast('Bin renamed: '+oldName+' → '+newBin.trim(),'success');
+    }}]
+  );
+  // Auto-focus the input after modal opens
+  setTimeout(()=>{const el=document.getElementById('_editBinInput');if(el){el.focus();el.select();}},100);
+}
 
 function getEarliestExpiration(sec){
   let earliest=null;
@@ -3435,15 +3493,22 @@ function sectionHTML(sec){
     const bec=expClass(sec.bulkExpDate);
     bulkExpInfo=` · Exp: <strong class="${bec}">${sec.bulkExpDate}</strong>`;
   }
+  // Build expiration summary for header — show earliest (or bulk) exp date prominently
+  let headerExp='';
+  if(sec.bulkExpDate){
+    const bec=expClass(sec.bulkExpDate); headerExp=`<span class="bin-exp-badge ${bec}">Exp: ${sec.bulkExpDate}</span>`;
+  } else if(earliest){
+    const ec=expClass(earliest.expirationDate); headerExp=`<span class="bin-exp-badge ${ec}">Exp: ${formatDate(earliest.expirationDate)}</span>`;
+  }
   return `<div class="section-card" data-section-id="${sec.id}">
     <div class="section-header" onclick="toggleSec(${sec.id})">
       <div class="section-header-left">
         <span class="section-collapse-icon">▼</span>
         <span class="section-badge ${badge(sec.systemType)}">${sec.systemType}</span>
-        <span class="section-title">${sec.binLocation}</span>
+        <span class="section-title" title="Click to edit bin number" onclick="event.stopPropagation();editBinNumber(${sec.id})" style="cursor:pointer;border-bottom:1px dashed var(--text-muted);">${sec.binLocation}</span>
         <button class="btn btn-secondary" style="padding:2px 6px;font-size:10px;margin-left:4px;" onclick="event.stopPropagation();openBarcodeScanner(function(code){handleBinScan(code,${sec.id})})" title="Scan into this bin">📷</button>
-        <span class="section-meta">${rc} packed / ${totalRows} entries / ${sec.maxChutes} max${bulkExpInfo}</span>
-        ${dateInfo}
+        ${headerExp}
+        <span class="section-meta" style="margin-left:8px;">${rc} packed / ${totalRows} entries / ${sec.maxChutes} max${bulkExpInfo}</span>
       </div>
       <div class="section-header-right">
         <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();setBulkCount(${sec.id})" title="Set packed count without serial numbers" style="font-size:10px;padding:2px 8px;">${sec.bulkCount?'📦 '+(parseInt(sec.bulkCount)-(parseInt(sec._bulkSignedOut)||0))+'/'+sec.bulkCount+(sec.bulkPackDate?' ('+sec.bulkPackDate+')':''):'Set Count'}</button>
@@ -5660,21 +5725,31 @@ function renderPSR(){
   const inputStyle='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px;font-weight:600;width:55px;text-align:center;outline:none;font-family:inherit;padding:3px;';
   const diffStyle=(d)=>`font-size:11px;font-weight:700;margin-top:2px;color:${d===0?'var(--success)':'var(--danger)'}`;
 
+  const isAdminUser=(currentUser&&(currentUser.role==='admin'||currentUser.role==='masteradmin'));
   function onHandBox(label,actual,cap,onch){
     const d=actual-cap;
-    return `<div style="text-align:center;">
-      <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:2px;">${actual}</div>
-      <input type="number" value="${cap||''}" placeholder="#" onchange="${onch}" style="${inputStyle}">
-      <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">${label}</div>
-      <div style="${diffStyle(d)}">${d<0?d:d===0?'✓':'+'+d}</div>
-    </div>`;
+    if(isAdminUser){
+      return `<div style="text-align:center;">
+        <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:2px;">${actual}</div>
+        <input type="number" value="${cap||''}" placeholder="#" onchange="${onch}" style="${inputStyle}">
+        <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">${label}</div>
+        <div style="${diffStyle(d)}">${d<0?d:d===0?'✓':'+'+d}</div>
+      </div>`;
+    } else {
+      // Rigger/viewer: show read-only — just the number and label, no input
+      return `<div style="text-align:center;">
+        <div style="font-size:20px;font-weight:700;color:var(--accent);margin-bottom:2px;">${cap||actual}</div>
+        <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">${label}</div>
+        <div style="${diffStyle(d)}">${d<0?d:d===0?'✓':'+'+d}</div>
+      </div>`;
+    }
   }
 
   // Total On Hand — full-width card on its own row
   html+=`<div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:12px;text-align:center;">
     <div style="font-size:28px;font-weight:700;color:var(--accent);">${totalCap}</div>
     <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px;">Total On Hand</div>
-    <div style="margin-bottom:10px;"><button onclick="syncCapacityToActual()" style="background:none;border:1px solid var(--accent);border-radius:4px;color:var(--accent);cursor:pointer;font-size:10px;padding:3px 10px;font-family:inherit;">⟳ Sync to Actual</button></div>
+    ${isAdminUser?'<div style="margin-bottom:10px;"><button onclick="syncCapacityToActual()" style="background:none;border:1px solid var(--accent);border-radius:4px;color:var(--accent);cursor:pointer;font-size:10px;padding:3px 10px;font-family:inherit;">⟳ Sync to Actual</button></div>':''}
     <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
       ${onHandBox('T-11',actualT11,capT11,"var old=S.capacityT11;S.capacityT11=parseInt(this.value)||0;auditLog('config','On Hand Updated','T-11 capacity: '+old+' → '+S.capacityT11);save();renderPSR();")}
       ${onHandBox('T-11R',actualT11R,capT11R,"var old=S.capacityT11R;S.capacityT11R=parseInt(this.value)||0;auditLog('config','On Hand Updated','T-11R capacity: '+old+' → '+S.capacityT11R);save();renderPSR();")}
@@ -5685,16 +5760,25 @@ function renderPSR(){
       ${onHandBox('RA-1 DBSL',actualRA1DBSL,capRA1DBSL,"var old=S.capacityRA1DBSL;S.capacityRA1DBSL=parseInt(this.value)||0;auditLog('config','On Hand Updated','RA-1 DBSL capacity: '+old+' → '+S.capacityRA1DBSL);save();renderPSR();")}
       ${customCaps.map(function(cc,ci){
         let ccAct=0; S.sections.forEach(function(s){if(s.systemType===cc.sys) ccAct+=countRealRows(s)+(parseInt(s.bulkCount)||0);});
-        return `<div style="text-align:center;">
-          <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:2px;">${ccAct}</div>
-          <input type="number" value="${cc.cap||''}" placeholder="#" onchange="S.customCapacity[${ci}].cap=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
-          <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">${esc(cc.sys)}</div>
-          <div style="${diffStyle(ccAct-(parseInt(cc.cap)||0))}">${(ccAct-(parseInt(cc.cap)||0))<0?(ccAct-(parseInt(cc.cap)||0)):(ccAct-(parseInt(cc.cap)||0))===0?'✓':'+'+(ccAct-(parseInt(cc.cap)||0))}</div>
-          <button onclick="S.customCapacity.splice(${ci},1);save();renderPSR();" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:10px;margin-top:2px;">✕</button>
-        </div>`;
+        const ccD=ccAct-(parseInt(cc.cap)||0);
+        if(isAdminUser){
+          return `<div style="text-align:center;">
+            <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:2px;">${ccAct}</div>
+            <input type="number" value="${cc.cap||''}" placeholder="#" onchange="S.customCapacity[${ci}].cap=parseInt(this.value)||0;save();renderPSR();" style="${inputStyle}">
+            <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">${esc(cc.sys)}</div>
+            <div style="${diffStyle(ccD)}">${ccD<0?ccD:ccD===0?'✓':'+'+ccD}</div>
+            <button onclick="S.customCapacity.splice(${ci},1);save();renderPSR();" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:10px;margin-top:2px;">✕</button>
+          </div>`;
+        } else {
+          return `<div style="text-align:center;">
+            <div style="font-size:20px;font-weight:700;color:var(--accent);margin-bottom:2px;">${cc.cap||ccAct}</div>
+            <div style="font-size:9px;color:var(--text-muted);margin-top:2px;">${esc(cc.sys)}</div>
+            <div style="${diffStyle(ccD)}">${ccD<0?ccD:ccD===0?'✓':'+'+ccD}</div>
+          </div>`;
+        }
       }).join('')}
       <div style="text-align:center;display:flex;align-items:center;">
-        <button onclick="addCustomCapacity()" style="background:none;border:1px dashed var(--accent);border-radius:6px;color:var(--accent);cursor:pointer;font-size:11px;padding:6px 10px;line-height:1.4;">+ Add<br>System</button>
+        ${isAdminUser?'<button onclick="addCustomCapacity()" style="background:none;border:1px dashed var(--accent);border-radius:6px;color:var(--accent);cursor:pointer;font-size:11px;padding:6px 10px;line-height:1.4;">+ Add<br>System</button>':''}
       </div>
     </div>
   </div>`;
@@ -6003,22 +6087,47 @@ function undoDeleteSignOut(){
 
 function addAbnOp(){
   if(!S.abnOps) S.abnOps=[];
-  S.abnOps.push({name:'',date:'',requested:''});
+  // New format: each op has name, date, sortOrder, and items:[{system,requested}]
+  S.abnOps.push({name:'',date:'',sortOrder:S.abnOps.length,items:[{system:'',requested:''}]});
   auditLog('ops','ABN Op Added','New operation added');
-  save(); renderPSR();
+  save(); renderABNPlanner();
 }
 function updAbnOp(idx,fld,val){
   if(!S.abnOps?.[idx]) return;
   var old=S.abnOps[idx][fld];
-  S.abnOps[idx][fld]=fld==='requested'?(parseInt(val)||''):val;
-  if(old!==S.abnOps[idx][fld]) auditLog('ops','ABN Op Updated',(S.abnOps[idx].name||'Op '+idx)+': '+fld+' changed to '+val);
-  save(); renderPSR();
+  S.abnOps[idx][fld]=val;
+  if(old!==val) auditLog('ops','ABN Op Updated',(S.abnOps[idx].name||'Op '+idx)+': '+fld+' changed to '+val);
+  save(); renderABNPlanner();
+}
+function updAbnOpItem(opIdx,itemIdx,fld,val){
+  if(!S.abnOps?.[opIdx]?.items?.[itemIdx]) return;
+  S.abnOps[opIdx].items[itemIdx][fld]=fld==='requested'?(parseInt(val)||''):val;
+  save(); renderABNPlanner();
+}
+function addAbnOpItem(opIdx){
+  if(!S.abnOps?.[opIdx]) return;
+  if(!S.abnOps[opIdx].items) S.abnOps[opIdx].items=[];
+  S.abnOps[opIdx].items.push({system:'',requested:''});
+  save(); renderABNPlanner();
+}
+function delAbnOpItem(opIdx,itemIdx){
+  if(!S.abnOps?.[opIdx]?.items) return;
+  S.abnOps[opIdx].items.splice(itemIdx,1);
+  save(); renderABNPlanner();
+}
+function moveAbnOp(idx,dir){
+  if(!S.abnOps) return;
+  var newIdx=idx+dir;
+  if(newIdx<0||newIdx>=S.abnOps.length) return;
+  var tmp=S.abnOps[idx]; S.abnOps[idx]=S.abnOps[newIdx]; S.abnOps[newIdx]=tmp;
+  save(); renderABNPlanner();
 }
 function delAbnOp(idx){
   if(!S.abnOps) return;
   var deleted=S.abnOps.splice(idx,1)[0];
-  auditLog('ops','ABN Op Deleted',(deleted.name||'Op '+idx)+' — '+( deleted.requested||0)+' chutes on '+(deleted.date||'no date'));
-  save(); renderPSR();
+  var totalReq=(deleted.items||[]).reduce(function(a,it){return a+(parseInt(it.requested)||0);},0);
+  auditLog('ops','ABN Op Deleted',(deleted.name||'Op '+idx)+' — '+totalReq+' chutes on '+(deleted.date||'no date'));
+  save(); renderABNPlanner();
   toast('ABN Op deleted. <button onclick="undoDelAbnOp()" style="background:var(--accent);color:#fff;border:none;padding:3px 10px;border-radius:4px;cursor:pointer;margin-left:6px;font-weight:600;">UNDO</button>','warning',10000);
   window._lastDeletedAbnOp=deleted;
 }
@@ -6027,8 +6136,18 @@ function undoDelAbnOp(){
   if(!S.abnOps) S.abnOps=[];
   S.abnOps.push(window._lastDeletedAbnOp);
   window._lastDeletedAbnOp=null;
-  save(); renderPSR();
+  save(); renderABNPlanner();
   toast('ABN Op restored','success');
+}
+// Migrate old single-system ops to new multi-item format
+function migrateAbnOps(){
+  if(!S.abnOps) return;
+  S.abnOps.forEach(function(op){
+    if(!op.items){
+      op.items=[{system:op.system||'',requested:op.requested||''}];
+      delete op.system; delete op.requested;
+    }
+  });
 }
 
 function goToBin(secId){
@@ -6119,34 +6238,57 @@ function renderABNPlanner(){
   var c=document.getElementById('abnPlannerContent');
   if(!c) return;
   if(!S.abnOps) S.abnOps=[];
+  migrateAbnOps(); // ensure new multi-item format
   var now=new Date(); now.setHours(0,0,0,0);
   var html='';
+  var is2='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:4px 8px;font-size:12px;outline:none;font-family:inherit;width:100%;';
+  var sysList2=['T-11','T-11R','T-11R SP','MC-6','RA-1','RA-1R','RA-1 DBSL'];
 
-  // ── ABN Ops table ──
-  var totalRequested=0;
-  S.abnOps.forEach(function(op){totalRequested+=(parseInt(op.requested)||0);});
-
+  // ── ABN Ops cards ──
   html+=`<div class="psr-section">
-    <div class="psr-section-title">✈️ Airborne Operations (ABN Op) <button class="btn btn-sm btn-secondary" onclick="addAbnOp();setTimeout(renderABNPlanner,100)" style="margin-left:8px;">+ Add Op</button></div>`;
+    <div class="psr-section-title">✈️ Airborne Operations (ABN Op)
+      <button class="btn btn-sm btn-secondary" onclick="addAbnOp()" style="margin-left:8px;">+ Add Op</button>
+    </div>`;
 
   if(S.abnOps.length>0){
-    html+=`<table class="psr-table" style="margin-bottom:16px;"><thead><tr><th>Operation</th><th>System</th><th>Date</th><th>Requested</th><th></th></tr></thead><tbody>`;
     S.abnOps.forEach(function(op,i){
-      var sysOpts='<option value="">--</option>';
-      ['T-11','T-11R','T-11R SP','MC-6','RA-1','RA-1R','RA-1 DBSL'].forEach(function(s){
-        sysOpts+=`<option value="${s}" ${op.system===s?'selected':''}>${s}</option>`;
+      var items=op.items||[];
+      var opTotal=items.reduce(function(a,it){return a+(parseInt(it.requested)||0);},0);
+      var isFirst=i===0, isLast=i===S.abnOps.length-1;
+      html+=`<div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px;background:var(--bg-card);">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
+          <div style="display:flex;gap:2px;">
+            <button class="btn btn-secondary" style="padding:2px 7px;font-size:11px;" onclick="moveAbnOp(${i},-1)" ${isFirst?'disabled':''} title="Move earlier">▲</button>
+            <button class="btn btn-secondary" style="padding:2px 7px;font-size:11px;" onclick="moveAbnOp(${i},1)" ${isLast?'disabled':''} title="Move later">▼</button>
+          </div>
+          <span style="font-size:11px;color:var(--text-muted);font-weight:600;">OP ${i+1}</span>
+          <input type="text" value="${esc(op.name)}" placeholder="Operation name (e.g. 143rd ABN)" onchange="updAbnOp(${i},'name',this.value)" style="${is2}flex:1;min-width:140px;">
+          <input type="date" value="${op.date||''}" onchange="updAbnOp(${i},'date',this.value)" style="${is2}width:140px;color-scheme:dark;">
+          <button class="row-action-btn delete" onclick="delAbnOp(${i})" title="Delete op">🗑</button>
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:6px;">
+          <thead><tr>
+            <th style="text-align:left;padding:4px 6px;color:var(--text-muted);font-weight:600;">System</th>
+            <th style="text-align:center;padding:4px 6px;color:var(--text-muted);font-weight:600;width:90px;">Requested</th>
+            <th style="width:32px;"></th>
+          </tr></thead>
+          <tbody>`;
+      items.forEach(function(it,j){
+        var sysOpts='<option value="">-- System --</option>';
+        sysList2.forEach(function(s){sysOpts+=`<option value="${s}" ${it.system===s?'selected':''}>${s}</option>`;});
+        html+=`<tr>
+          <td style="padding:3px 4px;"><select onchange="updAbnOpItem(${i},${j},'system',this.value)" style="${is2}">${sysOpts}</select></td>
+          <td style="padding:3px 4px;"><input type="number" value="${it.requested||''}" min="0" placeholder="#" onchange="updAbnOpItem(${i},${j},'requested',this.value)" style="${is2}text-align:center;"></td>
+          <td style="padding:3px 4px;text-align:center;">${items.length>1?`<button onclick="delAbnOpItem(${i},${j})" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:14px;padding:0 4px;">✕</button>`:''}</td>
+        </tr>`;
       });
-      var is2='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:4px 8px;font-size:12px;outline:none;font-family:inherit;width:100%;';
-      html+=`<tr>
-        <td><input type="text" value="${esc(op.name)}" placeholder="Op name" onchange="updAbnOp(${i},'name',this.value)" style="${is2}"></td>
-        <td style="width:110px;"><select onchange="updAbnOp(${i},'system',this.value)" style="${is2}">${sysOpts}</select></td>
-        <td style="width:130px;"><input type="date" value="${op.date||''}" onchange="updAbnOp(${i},'date',this.value)" style="${is2}color-scheme:dark;"></td>
-        <td style="width:90px;"><input type="number" value="${op.requested||''}" min="0" placeholder="#" onchange="updAbnOp(${i},'requested',this.value)" style="${is2}width:70px;text-align:center;"></td>
-        <td style="width:40px;"><button class="row-action-btn delete" onclick="delAbnOp(${i});renderABNPlanner()">🗑</button></td>
-      </tr>`;
+      html+=`</tbody></table>
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <button class="btn btn-secondary btn-sm" onclick="addAbnOpItem(${i})">+ Add System</button>
+          <span style="font-size:12px;color:var(--text-muted);">Total: <strong style="color:var(--text-primary);">${opTotal}</strong> chutes</span>
+        </div>
+      </div>`;
     });
-    html+=`<tr style="border-top:2px solid var(--border);"><td><strong>TOTAL</strong></td><td></td><td></td><td><strong>${totalRequested}</strong></td><td></td></tr>`;
-    html+=`</tbody></table>`;
   } else {
     html+=`<div style="color:var(--text-muted);font-size:12px;padding:8px 0 16px;">No operations scheduled. Click + Add Op to track.</div>`;
   }
@@ -6183,9 +6325,11 @@ function renderABNPlanner(){
       if(m) signedOut+=parseInt(so.count)||0;
     });
     (S.abnOps||[]).forEach(function(op){
-      var opSys=(op.system||'').trim();
-      var m=(sys==='T-11R')?(opSys==='T-11R'||opSys==='T-11R SP'):(opSys===sys);
-      if(m) requested+=parseInt(op.requested)||0;
+      (op.items||[{system:op.system||'',requested:op.requested||0}]).forEach(function(it){
+        var opSys=(it.system||'').trim();
+        var m=(sys==='T-11R')?(opSys==='T-11R'||opSys==='T-11R SP'):(opSys===sys);
+        if(m) requested+=parseInt(it.requested)||0;
+      });
     });
     sysAvail[sys]={packed,expiring:expiringThisMonth,signedOut,requested,available:packed-requested-expiringThisMonth};
   });
@@ -6382,9 +6526,11 @@ function printPSR(){
       if(m) signedOut+=parseInt(so.count)||0;
     });
     (S.abnOps||[]).forEach(op=>{
-      const opSys=(op.system||'').trim();
-      const m=(sys==='T-11R')?(opSys==='T-11R'||opSys==='T-11R SP'):(opSys===sys);
-      if(m) requested+=parseInt(op.requested)||0;
+      (op.items||[{system:op.system||'',requested:op.requested||0}]).forEach(it=>{
+        const opSys=(it.system||'').trim();
+        const m=(sys==='T-11R')?(opSys==='T-11R'||opSys==='T-11R SP'):(opSys===sys);
+        if(m) requested+=parseInt(it.requested)||0;
+      });
     });
     const maintSysKey=(sys==='T-11R')?'T-11R/SP':sys;
     (S.statusCounts[maintSysKey]?.maintenance||[]).forEach(e=>maint+=(parseInt(e.count)||0));
