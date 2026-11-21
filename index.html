@@ -399,7 +399,7 @@
   <div class="login-box" id="loginPanel">
     <h2>Parachute Management System</h2>
     <div class="subtitle">"I will be sure always"</div>
-    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v5.90.0</div>
+    <div style="font-size:9px;color:var(--text-muted);margin-bottom:8px;">v6.00.0</div>
     <input type="text" id="loginUser" class="form-input" placeholder="Enter last name" style="margin-bottom:12px;" list="loginUserList" autocomplete="off">
     <datalist id="loginUserList"></datalist>
     <input type="password" id="loginPin" class="form-input" placeholder="Enter PIN" maxlength="10" style="text-align:center;font-size:18px;letter-spacing:8px;" onkeydown="if(event.key==='Enter')doLogin()">
@@ -6244,51 +6244,54 @@ function renderABNPlanner(){
   var is2='background:var(--bg-input);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);padding:4px 8px;font-size:12px;outline:none;font-family:inherit;width:100%;';
   var sysList2=['T-11','T-11R','T-11R SP','MC-6','RA-1','RA-1R','RA-1 DBSL'];
 
-  // ── ABN Ops cards ──
-  html+=`<div class="psr-section">
-    <div class="psr-section-title">✈️ Airborne Operations (ABN Op)
-      <button class="btn btn-sm btn-secondary" onclick="addAbnOp()" style="margin-left:8px;">+ Add Op</button>
-    </div>`;
+  // ── ABN Ops table (sorted by date ascending) ──
+  var sortedOps=S.abnOps.map(function(op,i){return {op:op,i:i};}).sort(function(a,b){
+    var da=a.op.date||'9999-99-99', db=b.op.date||'9999-99-99';
+    return da<db?-1:da>db?1:0;
+  });
+  var totalRequested=0;
+  S.abnOps.forEach(function(op){
+    (op.items||[]).forEach(function(it){totalRequested+=(parseInt(it.requested)||0);});
+  });
 
-  if(S.abnOps.length>0){
-    S.abnOps.forEach(function(op,i){
+  html+=`<div class="psr-section">
+    <div class="psr-section-title">✈️ Airborne Operations (ABN Op) <button class="btn btn-sm btn-secondary" onclick="addAbnOp()" style="margin-left:8px;">+ Add Op</button></div>`;
+
+  if(sortedOps.length>0){
+    html+=`<table class="psr-table" style="margin-bottom:16px;"><thead><tr><th style="min-width:140px;max-width:220px;">Operation</th><th>System</th><th style="width:130px;">Date</th><th style="width:90px;">Requested</th><th style="width:40px;"></th></tr></thead><tbody>`;
+    sortedOps.forEach(function(entry){
+      var op=entry.op, i=entry.i;
       var items=op.items||[];
-      var opTotal=items.reduce(function(a,it){return a+(parseInt(it.requested)||0);},0);
-      var isFirst=i===0, isLast=i===S.abnOps.length-1;
-      html+=`<div style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px;background:var(--bg-card);">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
-          <div style="display:flex;gap:2px;">
-            <button class="btn btn-secondary" style="padding:2px 7px;font-size:11px;" onclick="moveAbnOp(${i},-1)" ${isFirst?'disabled':''} title="Move earlier">▲</button>
-            <button class="btn btn-secondary" style="padding:2px 7px;font-size:11px;" onclick="moveAbnOp(${i},1)" ${isLast?'disabled':''} title="Move later">▼</button>
-          </div>
-          <span style="font-size:11px;color:var(--text-muted);font-weight:600;">OP ${i+1}</span>
-          <input type="text" value="${esc(op.name)}" placeholder="Operation name (e.g. 143rd ABN)" onchange="updAbnOp(${i},'name',this.value)" style="${is2}flex:1;min-width:140px;">
-          <input type="date" value="${op.date||''}" onchange="updAbnOp(${i},'date',this.value)" style="${is2}width:140px;color-scheme:dark;">
-          <button class="row-action-btn delete" onclick="delAbnOp(${i})" title="Delete op">🗑</button>
-        </div>
-        <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:6px;">
-          <thead><tr>
-            <th style="text-align:left;padding:4px 6px;color:var(--text-muted);font-weight:600;">System</th>
-            <th style="text-align:center;padding:4px 6px;color:var(--text-muted);font-weight:600;width:90px;">Requested</th>
-            <th style="width:32px;"></th>
-          </tr></thead>
-          <tbody>`;
       items.forEach(function(it,j){
-        var sysOpts='<option value="">-- System --</option>';
+        var sysOpts='<option value="">--</option>';
         sysList2.forEach(function(s){sysOpts+=`<option value="${s}" ${it.system===s?'selected':''}>${s}</option>`;});
-        html+=`<tr>
-          <td style="padding:3px 4px;"><select onchange="updAbnOpItem(${i},${j},'system',this.value)" style="${is2}">${sysOpts}</select></td>
-          <td style="padding:3px 4px;"><input type="number" value="${it.requested||''}" min="0" placeholder="#" onchange="updAbnOpItem(${i},${j},'requested',this.value)" style="${is2}text-align:center;"></td>
-          <td style="padding:3px 4px;text-align:center;">${items.length>1?`<button onclick="delAbnOpItem(${i},${j})" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:14px;padding:0 4px;">✕</button>`:''}</td>
-        </tr>`;
+        var isFirst=(j===0), isLast=(j===items.length-1);
+        html+=`<tr>`;
+        if(isFirst){
+          html+=`<td style="max-width:220px;" rowspan="${items.length}">
+            <input type="text" value="${esc(op.name)}" placeholder="Op name" onchange="updAbnOp(${i},'name',this.value)" style="${is2}max-width:200px;">
+          </td>`;
+        }
+        html+=`<td style="width:110px;"><select onchange="updAbnOpItem(${i},${j},'system',this.value)" style="${is2}">${sysOpts}</select></td>`;
+        if(isFirst){
+          html+=`<td style="width:130px;" rowspan="${items.length}"><input type="date" value="${op.date||''}" onchange="updAbnOp(${i},'date',this.value)" style="${is2}color-scheme:dark;"></td>`;
+        }
+        html+=`<td style="width:90px;"><input type="number" value="${it.requested||''}" min="0" placeholder="#" onchange="updAbnOpItem(${i},${j},'requested',this.value)" style="${is2}width:70px;text-align:center;"></td>`;
+        if(isFirst){
+          html+=`<td style="width:40px;" rowspan="${items.length}">
+            <div style="display:flex;flex-direction:column;gap:2px;align-items:center;">
+              <button class="btn btn-secondary" style="padding:1px 6px;font-size:10px;" onclick="addAbnOpItem(${i})" title="Add system">+</button>
+              <button class="row-action-btn delete" onclick="delAbnOp(${i})">🗑</button>
+            </div>
+          </td>`;
+        } else {
+          html+=`<td style="width:40px;text-align:center;">${items.length>1?`<button onclick="delAbnOpItem(${i},${j})" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:13px;">✕</button>`:''}</td>`;
+        }
+        html+=`</tr>`;
       });
-      html+=`</tbody></table>
-        <div style="display:flex;align-items:center;justify-content:space-between;">
-          <button class="btn btn-secondary btn-sm" onclick="addAbnOpItem(${i})">+ Add System</button>
-          <span style="font-size:12px;color:var(--text-muted);">Total: <strong style="color:var(--text-primary);">${opTotal}</strong> chutes</span>
-        </div>
-      </div>`;
     });
+    html+=`<tr style="border-top:2px solid var(--border);"><td><strong>TOTAL</strong></td><td></td><td></td><td><strong>${totalRequested}</strong></td><td></td></tr>`;
+    html+=`</tbody></table>`;
   } else {
     html+=`<div style="color:var(--text-muted);font-size:12px;padding:8px 0 16px;">No operations scheduled. Click + Add Op to track.</div>`;
   }
